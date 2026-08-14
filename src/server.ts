@@ -58,10 +58,12 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
   app.use(bodyParser());
   app.use(async (ctx) => {
     const p = ctx.path;
+    // 精确匹配端点兼容尾斜杠(/mcp/ 与 /mcp 等价);read/search 路径即内容不受影响
+    const exact = p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p;
     const method = ctx.method;
     try {
       // ---- MCP streamable HTTP ----
-      if (p === '/mcp') {
+      if (exact === '/mcp') {
         if (method !== 'GET' && method !== 'POST' && method !== 'DELETE') {
           ctx.status = 405;
           ctx.body = { error: 'Method Not Allowed' };
@@ -72,7 +74,7 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
         return;
       }
       // ---- MCP legacy SSE ----
-      if (p === '/sse' && method === 'GET') {
+      if (exact === '/sse' && method === 'GET') {
         const tx = new SSEServerTransport('/messages', ctx.res);
         sseSessions.set(tx.sessionId, tx);
         ctx.res.on('close', () => sseSessions.delete(tx.sessionId));
@@ -82,7 +84,7 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
         await makeMcp().connect(tx);
         return;
       }
-      if (p === '/messages' && method === 'POST') {
+      if (exact === '/messages' && method === 'POST') {
         const tx = sseSessions.get(String(ctx.query.sessionId ?? ''));
         if (!tx) {
           ctx.status = 404;
@@ -105,7 +107,7 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
         return;
       }
       // ---- health ----
-      if (p === '/' || p === '/health') {
+      if (exact === '/' || exact === '/health') {
         ctx.body = { service: 'search-reader-mcp', status: 'ok' };
         return;
       }

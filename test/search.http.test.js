@@ -251,3 +251,9 @@ test('read 缺少 url(无路径段)返回 400', async () => {
   await request(app.callback()).get('/r').expect(400);
   await request(app.callback()).get('/read').expect(400);
 });
+
+test('精确匹配端点兼容尾斜杠(/health/ 等价 /health)', async () => {
+  const app = await makeApp();
+  await request(app.callback()).get('/health/').expect(200);
+  await request(app.callback()).get('/health').expect(200);
+});
