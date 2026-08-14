@@ -11,11 +11,16 @@
     "test": "tsc -p tsconfig.json && node --test \"test/*.test.js\""
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@koa/bodyparser": "^6.1.0",
     "@types/koa": "^2.15.0",
     "@types/node": "^24.0.0",
+    "@types/supertest": "^6.0.0",
+    "koa": "^3.1.2",
+    "supertest": "^7.0.0",
     "typescript": "^5.5.4"
   }
 }

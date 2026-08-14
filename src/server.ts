@@ -23,7 +23,6 @@ import { createMcpServer } from './mcp/server';
  */
 export interface AppDeps {
   config: Config;
-  cache?: CacheDb;
   /** 未传或 null 时 read/ 返回 503(测试/降级场景) */
   jina?: JinaReaderBridge | null;
 }
@@ -32,7 +31,8 @@ const READ_UNAVAILABLE = 'read 不可用:jina 桥接未初始化';
 
 export async function createApp(deps: AppDeps): Promise<Koa> {
   const config = deps.config;
-  const cache = deps.cache ?? CacheDb.open(config.sqlitePath);
+  // sqlite 缓存基础设施:先建库,暂不接入缓存(roadmap #3)
+  CacheDb.open(config.sqlitePath);
   const logger = new DailyLogger(config.logDir);
   const bocha = new BochaClient({ apiKey: config.bocha.apiKey, baseUrl: config.bocha.baseUrl });
   const jina = deps.jina ?? null;

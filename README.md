@@ -138,8 +138,8 @@ curl http://localhost:18081/health
 docker compose up dev
 
 # 或手动:宿主构建 + 单测,容器内验证
-npm install --no-save koa @koa/bodyparser supertest @types/supertest   # 宿主开发依赖
-npm test                    # tsc + 16 个 HTTP 契约测试
+npm install                 # 宿主开发/测试依赖(koa/supertest 等已在 devDependencies)
+npm test                    # tsc + HTTP 契约测试
 npm run build               # 构建到 dist/
 ```
 

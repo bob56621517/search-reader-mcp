@@ -20,10 +20,6 @@ export class CacheDb {
     return new CacheDb(path);
   }
 
-  get dbPath(): string {
-    return this.path;
-  }
-
   private migrate(): void {
     // 占位:后续接入缓存时在此建 search_cache / read_cache 等表
     this.db.exec(`
