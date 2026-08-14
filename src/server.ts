@@ -6,6 +6,7 @@ import { BochaClient } from './bocha/client';
 import { CacheDb } from './cache/sqlite';
 import { Config } from './config';
 import { JinaReaderBridge } from './jina/reader';
+import { DailyLogger } from './log/daily';
 import { createMcpServer } from './mcp/server';
 
 /**
@@ -32,6 +33,7 @@ const READ_UNAVAILABLE = 'read 不可用:jina 桥接未初始化';
 export async function createApp(deps: AppDeps): Promise<Koa> {
   const config = deps.config;
   const cache = deps.cache ?? CacheDb.open(config.sqlitePath);
+  const logger = new DailyLogger(config.logDir);
   const bocha = new BochaClient({ apiKey: config.bocha.apiKey, baseUrl: config.bocha.baseUrl });
   const jina = deps.jina ?? null;
 
@@ -57,6 +59,7 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
   const app = new Koa();
   app.use(bodyParser());
   app.use(async (ctx) => {
+    const startedAt = Date.now();
     const p = ctx.path;
     // 精确匹配端点兼容尾斜杠(/mcp/ 与 /mcp 等价);read/search 路径即内容不受影响
     const exact = p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p;
@@ -114,8 +117,11 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
       ctx.status = 404;
       ctx.body = { error: 'Not Found' };
     } catch (e) {
+      logger.error(`请求异常 ${ctx.method} ${ctx.path}: ${(e as Error).message}`);
       ctx.status = 500;
       ctx.body = { error: (e as Error).message };
+    } finally {
+      logger.info(`${ctx.method} ${ctx.path} ${ctx.status} ${Date.now() - startedAt}ms`);
     }
   });
 

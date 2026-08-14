@@ -9,10 +9,10 @@ const path = require('node:path');
 const { loadConfig } = require('../dist/config.js');
 const { createApp } = require('../dist/server.js');
 
-const tmpDb = path.join(os.tmpdir(), `srm-test-${process.pid}`, 'cache.db');
+const tmpDir = path.join(os.tmpdir(), `srm-test-${process.pid}`);
 
 function testConfig(overrides = {}) {
-  return loadConfig({ BOCHA_API_KEY: 'test-key', SQLITE_PATH: tmpDb, ...overrides });
+  return loadConfig({ BOCHA_API_KEY: 'test-key', SEARCH_READER_MCP_DATA: tmpDir, ...overrides });
 }
 
 /** mock 全局 fetch,记录请求体,返回固定 body */

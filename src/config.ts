@@ -20,6 +20,8 @@ export interface Config {
   dataDir: string;
   /** sqlite 库文件路径 */
   sqlitePath: string;
+  /** 日志目录(.log/,每天滚动) */
+  logDir: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -34,5 +36,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     dataDir,
     sqlitePath: env.SQLITE_PATH || path.join(dataDir, 'cache.db'),
+    logDir: env.LOG_DIR || path.join(dataDir, '.log'),
   };
 }

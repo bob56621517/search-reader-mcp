@@ -1,5 +1,6 @@
 import { loadConfig } from './config';
 import { createJinaReaderBridge } from './jina/reader';
+import { DailyLogger } from './log/daily';
 import { createApp } from './server';
 
 /**
@@ -8,12 +9,16 @@ import { createApp } from './server';
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+  const logger = new DailyLogger(config.logDir);
   const jina = await createJinaReaderBridge(config);
   const app = await createApp({ config, jina });
   const server = app.listen(config.port, config.host);
-  console.log(`[search-reader-mcp] listening on http://${config.host}:${config.port}`);
+  const url = `http://${config.host}:${config.port}`;
+  logger.info(`启动完成,监听 ${url}`);
+  console.log(`[search-reader-mcp] listening on ${url}`);
 
   const shutdown = (): void => {
+    logger.info('收到退出信号,关闭服务');
     server.close();
     process.exit(0);
   };
