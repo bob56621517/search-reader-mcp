@@ -1,0 +1,12 @@
+node_modules
+dist
+data
+*.db
+.git
+.scratch
+docs
+CONTEXT.md
+CLAUDE.md
+LICENSE
+*.log
+.env

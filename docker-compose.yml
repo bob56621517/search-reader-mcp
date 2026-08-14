@@ -1,0 +1,35 @@
+services:
+  search-reader-mcp:
+    build: .
+    image: search-reader-mcp:latest
+    container_name: search-reader-mcp
+    ports:
+      - "18081:18081"
+    environment:
+      # ---- 默认值集中在此,用户按需手工改 ----
+      PORT: "18081"                            # 容器内监听端口(对外同端口)
+      HOST: "0.0.0.0"
+      BOCHA_API_KEY: "${BOCHA_API_KEY:-}"      # 标准环境变量,开发/compose 共用
+      BOCHA_URL: "https://api.bochaai.com"
+      JINA_APP: "/app"                         # jina 镜像应用根目录
+    volumes:
+      # 持久化目录外挂到宿主 ~/.search_reader_mcp/;sqlite 缓存库与配置文件都在这
+      - "${HOME}/.search_reader_mcp:/app/extension/data"
+    restart: unless-stopped
+
+  # 开发容器:基于 jina 镜像直接开发,挂载工作区,tsc --watch + node --watch 热重载
+  # 用法:docker compose up dev(映射 18082 以免与主服务 18081 冲突)
+  dev:
+    image: ghcr.io/jina-ai/reader:latest
+    entrypoint: ["/bin/bash"]
+    command: ["-c", "npm --prefix /app install --no-save @modelcontextprotocol/sdk && cd /app/extension && bash dev.sh"]
+    volumes:
+      - ".:/app/extension"
+    environment:
+      PORT: "18081"
+      HOST: "0.0.0.0"
+      BOCHA_API_KEY: "${BOCHA_API_KEY:-}"
+      BOCHA_URL: "https://api.bochaai.com"
+      JINA_APP: "/app"
+    ports:
+      - "18082:18081"
