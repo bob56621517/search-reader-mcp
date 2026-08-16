@@ -167,3 +167,6 @@ scripts/           冒烟辅助脚本
 - [CONTEXT.md](./CONTEXT.md) — 领域术语表
 - [docs/adr/](./docs/adr/) — 架构决策(单端口整合、search 独立、read 复用)
 - [docs/smoke-test.md](./docs/smoke-test.md) — 容器冒烟流程
+
+## 认证
+[![M8ven Score](https://m8ven.ai/badge/mcp/bob56621517-search-reader-mcp-4crvca)](https://m8ven.ai/mcp/bob56621517-search-reader-mcp-4crvca)
