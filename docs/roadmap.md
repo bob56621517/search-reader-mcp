@@ -17,3 +17,9 @@ sqlite 缓存基础设施已建库(先建库不接缓存,`src/cache/sqlite.ts`)�
 ## 4. read 工具支持本地文件
 
 在 `url`(http/https)基础上支持本地文件读取 → Markdown。单容器场景下 `file://` 语义 = 读容器内/挂载目录的文件(如 compose 外挂卷内的文档);需定义 scheme(`file://`)与路径映射、支持的格式(文本/PDF/Office)。
+
+## 5. 无mcp,纯skill
+提供一个 skill, 指导 agent 直接 启动 docker, 使用 rest api 而不是 mcp服务,降低token 消耗和对环境的依赖
+
+## 6. claudecode 插件化
+
