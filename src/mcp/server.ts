@@ -2,37 +2,57 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { BochaClient } from '../bocha/client';
 import { AiSearchResult, WebPage } from '../bocha/types';
+import type { Config } from '../config';
+import {
+  type ReadEngine,
+  DEFAULT_READ_LENGTH,
+  buildReadSchema,
+  isHttpScheme,
+  renderUploadTemplate,
+  resolveReadTimeout,
+  sliceText,
+} from './read-tools';
 
 /**
  * MCP 服务层(官方 SDK)。暴露两个工具:
  *  - search:type 默认 ai(web/ai 合一),工具层预设默认值并格式化
- *  - read:url(http/https),复用本服务 read/ 路由
+ *  - read:uri + skip/length/engine/timeout,复用本服务 read/ 路由;非 http(s) 返回上传引导模板
  */
+
+export interface ReadUrlOptions {
+  engine?: ReadEngine;
+  timeout?: number;
+}
 
 export interface McpToolDeps {
   bocha: BochaClient;
-  readUrl(url: string): Promise<string>;
+  /** 配置:serverUrl 渲染模板、readTimeout 默认链、mcpDesc 描述注入(search/read 均取自 config.mcpDesc) */
+  config: Pick<Config, 'serverUrl' | 'readTimeout' | 'mcpDesc'>;
+  /** self-call 复用本服务 read/ 路由;返回全文 Markdown,MCP 层做切片 */
+  readUrl(url: string, opts?: ReadUrlOptions): Promise<string>;
 }
 
 export function createMcpServer(deps: McpToolDeps): McpServer {
-  const server = new McpServer({ name: 'search-reader-mcp', version: '0.1.0' });
+  const server = new McpServer({ name: 'search-reader-mcp', version: '0.2.0' });
+  const desc = deps.config.mcpDesc;
+  const searchDesc = desc.search;
 
   server.tool(
     'search',
-    '博查(bocha)搜索 MCP 工具。type 缺省为 ai(AI 语义搜索):除网页来源外还返回大模型总结答案、追问问题与垂域模态卡,适合事实问答/综述;需要排除特定网站或只要裸网页列表时显式 type="web"。返回的网页来源请在回答末尾把 URL 渲染为超链接附上,便于用户溯源。',
+    searchDesc.description,
     {
-      type: z
-        .enum(['ai', 'web'])
-        .optional()
-        .describe('搜索类型:ai(默认,AI 语义搜索,含总结/追问/模态卡)或 web(网页长摘要列表,支持 exclude)'),
-      query: z.string().describe('搜索关键词'),
-      count: z.number().int().optional().describe('返回条数上限,默认 20,最大 50(越界自动钳制)'),
-      freshness: z
-        .string()
-        .optional()
-        .describe('时效:noLimit(默认)/oneDay/oneWeek/oneMonth/oneYear,或 YYYY-MM-DD..YYYY-MM-DD 日期范围'),
-      include: z.string().optional().describe('限定网站范围:根域名或子域名,多个用 | 或 , 分隔,最多 100 个;web/ai 均支持'),
-      exclude: z.string().optional().describe('排除网站范围:同上;仅 type="web" 生效'),
+      type: z.enum(['ai', 'web']).optional().describe(searchDesc.type),
+      query: z.string().describe(searchDesc.query),
+      count: z.number().int().optional().describe(searchDesc.count),
+      freshness: z.string().optional().describe(searchDesc.freshness),
+      include: z.string().optional().describe(searchDesc.include),
+      exclude: z.string().optional().describe(searchDesc.exclude),
+    },
+    {
+      title: '联网搜索(博查)',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
     },
     async ({ type, query, count, freshness, include, exclude }) => {
       const n = Math.max(1, Math.min(50, count ?? 20));
@@ -51,9 +71,30 @@ export function createMcpServer(deps: McpToolDeps): McpServer {
 
   server.tool(
     'read',
-    '将网页或 PDF(URL)转换为 Markdown 正文返回。例:url=https://example.com 返回该网页的 Markdown 正文。',
-    { url: z.string().describe('要读取的网页/PDF 地址(http/https)') },
-    async ({ url }) => textResult(await deps.readUrl(url)),
+    desc.read.description,
+    buildReadSchema(desc.read),
+    {
+      title: '读取网页或文件(jina)',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    async ({ uri, skip, length, engine, timeout }) => {
+      try {
+        // scheme 分流:非 http(s) 不抓取,返回自包含上传引导模板
+        if (!isHttpScheme(uri)) {
+          return textResult(renderUploadTemplate(deps.config.serverUrl));
+        }
+        const full = await deps.readUrl(uri, {
+          engine: engine ?? 'auto',
+          timeout: resolveReadTimeout(timeout, deps.config.readTimeout),
+        });
+        return textResult(sliceText(full, skip ?? 0, length ?? DEFAULT_READ_LENGTH));
+      } catch (e) {
+        // 超时/网络异常转可读错误文本,不抛错;非 Error 也转 String 而非字面 undefined
+        return textResult(e instanceof Error ? e.message : String(e));
+      }
+    },
   );
 
   return server;

@@ -2,6 +2,9 @@ node_modules/
 dist/
 *.log
 
+# 并行任务的 worktree 目录(仓库内 src-<NN>-<slug>)
+src-*/
+
 # 本地数据(sqlite 库、缓存)不入库
 data/
 *.db

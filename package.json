@@ -1,13 +1,12 @@
 {
   "name": "search-reader-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "扩展 jina-reader 镜像:自定义搜索(bocha)+ MCP 服务,单端口整合服务器覆盖默认服务",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "dev": "bash dev.sh",
     "test": "tsc -p tsconfig.json && node --test \"test/*.test.js\""
   },
   "dependencies": {

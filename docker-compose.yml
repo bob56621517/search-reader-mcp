@@ -12,24 +12,17 @@ services:
       BOCHA_API_KEY: "${BOCHA_API_KEY:-}"      # 标准环境变量,开发/compose 共用
       BOCHA_URL: "https://api.bochaai.com"
       JINA_APP: "/app"                         # jina 镜像应用根目录
+      # ---- 一期增强(v7)新增 env ----
+      READ_CACHE_TTL: "600"                    # read 缓存 TTL(秒),命中后滑动续期(默认 10 分钟)
+      READ_TIMEOUT: "90"                       # HTTP 层整体超时兜底(秒),超时 504
+      SERVER_URL: "http://localhost:18081"     # 服务端对外地址(上传解析提示词模板渲染用;云部署改为公网地址)
+      # MCP_* 描述 env:缺省 = 内建工具/参数描述,有值即覆盖。
+      # 模式:MCP_<TOOL>_DESC = 工具描述、MCP_<TOOL>_<PARAM> = 参数描述;
+      # 例:MCP_SEARCH_DESC、MCP_READ_DESC、MCP_READ_URI、MCP_READ_LENGTH。
+      # 未设置的描述沿用内建,不在此逐一列举(任意 MCP_* 描述变量均生效)。
     volumes:
-      # 持久化目录外挂到宿主 ~/.search_reader_mcp/;sqlite 缓存库与配置文件都在这
-      - "${HOME}/.search_reader_mcp:/app/extension/data"
+      # 持久化目录外挂到宿主 ~/.search_reader_mcp/;sqlite 缓存库与配置文件都在这。
+      # 用 `~` 而非 ${HOME}:compose 会把 `~` 展开为当前用户 home,Windows/Linux 通用
+      # (${HOME} 在 cmd/PowerShell 下未设置,会解析成空串导致挂载到根路径、容器内无写权限)。
+      - "~/.search_reader_mcp:/app/extension/data"
     restart: unless-stopped
-
-  # 开发容器:基于 jina 镜像直接开发,挂载工作区,tsc --watch + node --watch 热重载
-  # 用法:docker compose up dev(映射 18082 以免与主服务 18081 冲突)
-  dev:
-    image: ghcr.io/jina-ai/reader:latest
-    entrypoint: ["/bin/bash"]
-    command: ["-c", "npm --prefix /app install --no-save @modelcontextprotocol/sdk && cd /app/extension && bash dev.sh"]
-    volumes:
-      - ".:/app/extension"
-    environment:
-      PORT: "18081"
-      HOST: "0.0.0.0"
-      BOCHA_API_KEY: "${BOCHA_API_KEY:-}"
-      BOCHA_URL: "https://api.bochaai.com"
-      JINA_APP: "/app"
-    ports:
-      - "18082:18081"

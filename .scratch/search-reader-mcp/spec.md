@@ -1,82 +1,86 @@
-# search-reader-mcp — 整合服务器 spec
+# search-reader-mcp 一期增强 spec
 
 Status: ready-for-agent
 
 ## Problem Statement
 
-现有 jina-reader 镜像只提供"URL→可读文本"的单一抓取服务,没有自定义搜索能力,也不接入 MCP 生态。用户需要在这个镜像基础上扩展一个**单端口整合 HTTP 服务器**:在一个端口上同时提供 jina 的读取能力、bocha 联网搜索、以及供 AI 客户端调用的 MCP 服务,并且要直接复用镜像已有的环境(Node 24 + Chrome + 依赖),而不是另起炉灶。
+整合服务器(ADR-0001)已提供基础 read/search/mcp/sse。当前 read 能力受三处限制:① 路由只支持 `GET /read/<url>` 且**改写 `req.url` 时丢失 query string**;② 无缓存,同一 URL 每次都走 Chrome 全量渲染(最贵);③ MCP `read` 工具只有 `url` 一个参数,无分页/引擎/超时控制,非 http(s) 资源(本地文件等)只能生硬报错。此外 MCP 工具描述硬编码在代码里,部署者无法按场景定制。README 偏简略,不足以充当使用手册。
+
+用户需要:jina 的 read 能力以**全量路由**形态透传(含 `POST` 文件上传解析),抓取结果**缓存**复用,`read` MCP 工具支持**分片续读/引擎/超时**,非 http(s) 资源给出**可执行的引导**而非报错,工具描述**可 env 覆盖**,README 升级为**手册**。
 
 ## Solution
 
-交付一个"扩展 jina-reader 镜像"的工程:以 jina 镜像为基座,新增一个整合服务器进程,**覆盖镜像默认启动的 crawl.js**。服务器监听单一端口(18081,容器内外一致),路径前缀路由:
+在整合服务器上做一期增强,交付形态不变(单服务、单端口):
 
-- `read/`(别名 `r/`)— 进程内复用 jina 抓取模块,URL→Markdown
-- `search/web`、`search/ai`(别名 `s/web`、`s/ai`)— bocha 搜索,返回结构化 JSON
-- `mcp/` — MCP 服务(streamable HTTP)
-- `sse/` — MCP legacy SSE 传输(兼容老客户端),配套 `POST /messages`
-
-MCP 层暴露两个工具:`search`(type 默认 `ai`,web/ai 合一)与 `read`(仅 url)。配置走环境变量,默认值集中在 `docker-compose.yml`;sqlite 缓存先建库、暂不接入。开发环境直接使用该镜像。
+- **Jina 全量路由挂载**:`/read/**` 全量透传 jina 原生路由(`/r` 同义、任意 method),保留 query string;`POST /read` 即原生文件上传解析(multipart `file` → Markdown);bodyParser 按 Content-Type 分流不吞 multipart。
+- **read 缓存**:一级缓存仅缓存解析后的 Markdown,键 = `uri(含 query)+ engine`,TTL 默认 300s 滑动续期,惰性删除叠加每小时兜底清理,同键 in-flight 去重;HTTP 层与 MCP self-call 共用。
+- **MCP `read` 工具增强**:参数 `uri`/`skip`/`length`/`engine`/`timeout`;返回 `[skip, skip+length)` 纯文本切片(默认 5000 字符,上限 50000),截断时尾部提示可续读;`engine` 三枚举 `auto`/`direct`/`browser`;`timeout` 整体预算(默认链 `timeout` > env `READ_TIMEOUT` > 90s,上限 600);一次一个 uri 不支持并行。
+- **非 http(s) 处理**:不实现任何下载协议;返回**自包含提示词模板**,引导 agent 自行下载后经 `POST /read` 上传解析(端点地址由 `SERVER_URL` env 渲染,参数对齐 MCP 功能)。
+- **描述 env 化**:工具与参数描述经 `MCP_<TOOL>[_<PARAM>]_DESC` 形式 env 覆盖,缺省为内建描述。
+- **timeout 体系**:三层(MCP 参数 → HTTP `X-Read-Timeout` 硬超时 → clamp-180 的 jina `x-timeout` 透传)。
+- **README 手册化** + 文档(ADR/roadmap/CONTEXT)同步。
 
 ## User Stories
 
-1. 作为使用者,我想通过 `GET /read/<url>`(路径即 url)把网页/PDF 转成 Markdown,以便 LLM 或脚本直接消费正文。
-2. 作为使用者,我想用 `GET /r/<url>` 这个短别名访问读取能力,以符合 jina 的 r./s. 习惯并少打几个字。
-3. 作为使用者,我想通过 `GET /search/web/<query>`(query 直接在路径中)得到 bocha 网页搜索结果(结构化 JSON:标题/链接/站点/摘要),以便程序化处理。
-4. 作为使用者,我想用 `GET /search/ai/<query>` 或其快捷方式 `GET /s/<query>` 得到 AI 语义搜索结果(总结答案+参考网页+模态卡+追问),以便直接获得综述型答案。
-5. 作为搜索调用方,我想用 `POST /search/ai`、`POST /search/web`、`POST /s` 传标准 JSON body(query 与高级参数),以便复杂参数场景下标准化调用。
-6. 作为搜索调用方,我想传入 `count`、`freshness`、`include`、`exclude` 等可选参数,以便控制结果条数与范围;`count` 越界会被钳制到 1..50,freshness 非法值回退到 `noLimit`。
-7. 作为搜索调用方,当 `query` 缺失或空时,我希望收到 400 类错误提示,而不是静默失败。
-8. 作为搜索调用方,当 bocha API 返回非 200 或响应无法解析时,我希望收到包含 code/msg 的可读错误。
-9. 作为 AI 客户端,我想通过 `POST /mcp` 用 streamable HTTP 连接 MCP 服务,以便在 Claude Code 等工具里调用 `search` 与 `read` 工具。
-10. 作为 AI 客户端,我想调用 `search` 工具(默认 AI 语义搜索),并可选 `type="web"` 切换到裸网页列表,以便灵活获取搜索结果。
-11. 作为 AI 客户端,我想调用 `search` 工具时看到模型友好的格式化文本(带 AI 总结、模态卡、编号参考网页、追问问题),并被告知把来源渲染为超链接。
-12. 作为 AI 客户端,我想调用 `read` 工具传入一个 http(s) URL,得到该页面的 Markdown 正文。
-13. 作为老版 MCP 客户端,我想通过 `GET /sse` 建立 SSE 事件流、向 `/messages` POST 请求,以便不升级也能继续使用本服务。
-14. 作为部署者,我想通过 `docker compose up` 一键启动服务,容器监听 18081、外部同样通过 18081 访问。
-15. 作为部署者,我想用宿主已有的 `BOCHA_API_KEY` 环境变量注入密钥,不在任何地方硬编码。
-16. 作为部署者,我想让 sqlite 库与配置文件持久化在宿主 `~/.search_reader_mcp/`,以便容器重建后数据仍在。
-17. 作为部署者,我想在 `docker-compose.yml` 里集中修改端口、URL、路径等默认值,而不必改代码。
-18. 作为开发者,我想在基于 jina 镜像的开发容器里用 `tsc --watch` + `node --watch` 热重载,改代码即生效。
-19. 作为开发者,我想构建镜像后其默认启动就是整合服务器(覆盖原 crawl.js),无需额外命令。
-20. 作为维护者,当未配置 `BOCHA_API_KEY` 时,我希望 search 能力明确报错提示,而不是崩溃或返回垃圾数据。
-21. 作为维护者,我希望 sqlite 缓存基础设施在首次启动时自动建库,后续接入缓存无需改部署。
+1. 作为使用者,我想 `GET /read/<url>`(URL 含 query string)把网页转成 Markdown,且 URL 的 query 不丢失,以便读取带参数的动态页面。
+2. 作为使用者,我想 `POST /read` 上传本地文件(PDF/Word/Excel/PPT/HTML/纯文本)解析为 Markdown,以便不托管文件即可读取其内容。
+3. 作为使用者,我想对同一 URL 的重复读取命中缓存、快速返回,以便减少重复抓取等待。
+4. 作为使用者,我想缓存命中时不被算进超时预算,以便大文件分片续读时每次续读都快。
+5. 作为 MCP 客户端,我想 `read` 工具用 `uri` 传地址,以便读取网页/PDF 内容。
+6. 作为 MCP 客户端,我想 `read` 工具用 `skip`/`length` 分片读取长文,以便在上下文窗口内按需取段。
+7. 作为 MCP 客户端,我想切片恰好到文末时不加多余提示、被截断时尾部提示全文长度与剩余位置,以便知道是否还有内容可续读。
+8. 作为 MCP 客户端,我想 `read` 工具用 `engine` 控制抓取方式(`auto`/`direct`/`browser`),以便动态页面用浏览器渲染、静态内容走轻量抓取。
+9. 作为 MCP 客户端,我想 `read` 工具用 `timeout` 控制单次读取的整体预算,以便读取 20MB 级大文件时不被默认超时掐断。
+10. 作为 MCP 客户端,我想 `read` 传入非 http(s) 的 uri 时收到自包含的引导(自行下载 → `POST /read` 上传),而不是生硬报错,以便能自主完成对本地/私有文件的读取。
+11. 作为 MCP 客户端,我希望引导模板里给出可执行的 `curl` 示例与逐项参数解释,以便不用再去查文档就能执行。
+12. 作为 MCP 客户端,我希望 `read` 一次只读一个 uri,以便行为可预期(并行由我自己开 subagent)。
+13. 作为 MCP 客户端,我希望解析结果默认保留页面中所有链接 URL 与图片 URL、且不递归展开链接内容,以便溯源与引用。
+14. 作为 MCP 客户端,我想 `search` 工具保持既有行为锚定(`type` 默认 `ai`、`count` 钳制 1..50、`freshness` 非法回退 `noLimit`、异常返回可读错误文本),以便稳定调用。
+15. 作为部署者,我想通过 `SERVER_URL` 配置服务对外地址,以便提示词模板指向正确的上传端点(本地默认 `localhost:18081`,云部署为公网地址)。
+16. 作为部署者,我想通过 `READ_CACHE_TTL` 配置缓存有效期、`READ_TIMEOUT` 配置整体超时兜底,以便按部署场景调参。
+17. 作为部署者,我想通过 `MCP_*` env 覆盖工具/参数描述,以便按客户端场景定制模型引导,而不改代码。
+18. 作为部署者,我想工具描述 env 缺省时回退到内建描述,以便开箱即用。
+19. 作为维护者,我希望缓存对同一 URL 的并发请求去重(只抓一次),以便避免重复抓取与缓存双写竞态。
+20. 作为维护者,我希望过期的缓存条目被惰性删除 + 每小时定时兜底清理,以便磁盘与缓存表不无限增长。
+21. 作为维护者,我希望抓取失败/错误响应不写入缓存,以便不长期返回坏结果。
+22. 作为维护者,我希望 `POST /read` 上传解析不缓存,以便行为简单可预期。
+23. 作为使用者,我希望 HTTP 层支持 `X-Read-Timeout` header 控制单次请求超时(REST 直连也可用),以便大文件 REST 调用不被服务端过早掐断。
+24. 作为维护者,我希望 `timeout` 预算 clamp 到 180s 后透传给 jina `x-timeout`,以便服务端整体预算与 jina 内部抓取预算对齐。
+25. 作为使用者,我想在 README 手册中找到全部路由、上传、配置、缓存与超时的说明,以便自助使用与排障。
 
 ## Implementation Decisions
 
-- **整合服务器(单体 HTTP 服务)**:一个 koa 进程,单端口监听,路径分发 `read/`(别名 `r/`)、search(`/search/ai/<query>` 与 `/search/web/<query>` 路径即 query,快捷方式 `/s/<query>` 即 ai;GET 同时支持 query string 高级参数,POST JSON body,GET/POST 交叉)、`mcp/`、`sse/`。覆盖镜像默认启动,启动时不调用 jina 自带的 listen。
-- **read 复用 jina 抓取模块(ADR-0003)**:进程内 resolve 镜像编译产物 `build/stand-alone/crawl.js` 的 `CrawlStandAloneServer`,取它的 `koaApp` 完整中间件栈挂到 `/read`(及 `/r`)前缀,复用其 Chrome 抓取、反爬对抗、PDF 解析;请求改写为 jina 期望的路径形态。URL 来自查询参数 `url`。
-- **bocha 客户端(能力层,ADR-0002)**:独立实现,照搬参考实现 `xyz-mcp-hub` 的 `BochaClient` 语义到 Node——两个端点 `/v1/web-search` 与 `/v1/ai-search`,HTTP 客户端用内置 `fetch`;参数透传(query 必填、count 钳制 1..50、freshness 枚举或日期范围、布尔参数透传、include/exclude);base-url 默认 `https://api.bochaai.com`、`Authorization: Bearer <key>`;非 200/解析失败抛可读错误。返回结构化 VO(WebPage / AiSearchResult / ModalCard)。
-- **搜索工具层**:预设默认值(count=20、freshness=noLimit、web 场景 summary=true、ai 场景 answer=true),把 VO 格式化为模型友好文本(参考实现 BochaTools 的格式)。
-- **MCP 服务**:基于官方 `@modelcontextprotocol/sdk`。`/mcp` 用 `StreamableHTTPServerTransport`(streamable HTTP,单一会话先启用);`/sse` 用 `SSEServerTransport`(legacy,GET 建流 + POST `/messages`),两者共享同一工具注册表。工具:`search`(type 默认 `ai`)与 `read`(url)。
-- **read 工具与 HTTP read 路由**:共享同一读取能力;MCP read 工具内部走本服务 `read/` 路由。
-- **sqlite 缓存(先建库不接缓存)**:用 Node 24 内置 `node:sqlite`(零依赖),首次启动建 `meta` 表占位;库文件默认落于持久化数据目录。
-- **配置**:环境变量注入,默认值集中定义于 `docker-compose.yml`:`PORT=18081`、`HOST=0.0.0.0`、`BOCHA_API_KEY`(透传宿主)、`BOCHA_URL`、`JINA_APP=/app`;数据目录外挂宿主 `~/.search_reader_mcp` → 容器 `/app/extension/data`。
-- **工程布局**:TypeScript(CommonJS,对齐镜像工程);仓库根即工程,镜像内 `/app/extension`;额外依赖(MCP SDK 等)补装进镜像 `/app/node_modules` 共享树;构建用镜像自带 `typescript`。
-- **部署**:Dockerfile `FROM ghcr.io/jina-ai/reader:latest` 并改 `CMD` 指向整合服务器入口;docker-compose 映射 `18081:18081`、透传 `BOCHA_API_KEY`、挂载持久化目录。开发用 `dev.sh`(`tsc --watch` + `node --watch`)。
+- **全量路由挂载**:`/read` → jina `/`、`/read/<rest>` → `/<rest>`;`/r` 完全同义;任意 method;改写 `req.url` 时保留原始 query string;`ctx.respond=false` 交 jina koaApp;不引入 koa-mount(沿用 `handleRead` 手动改写模式)。`/`、`/health` 仍为本服务 health。
+- **bodyParser 分流**:全局 bodyParser 不得吞 `/read/**` 的 multipart body;按 Content-Type 分流(JSON body 留给 search,multipart 放行给 read 上传)。
+- **缓存**:一级缓存只缓存解析后 Markdown;键 = `uri(含 query)+ engine`,engine 归一化为 `auto`/`browser`/`curl`;联合唯一约束;TTL `READ_CACHE_TTL`(默认 300)滑动续期;惰性删除 + 每小时定时兜底清理(仅删过期行,不误删并发写入);只缓存成功响应;上传解析不缓存;in-flight 去重粒度 = 缓存键(同键共享进行中 Promise)。缓存层在 HTTP read 层,HTTP 直连与 MCP self-call 共用。
+- **MCP `read` 工具**:参数 `uri`(必填,实现层按 scheme 分流:http(s) 抓取、其他返回模板)、`skip`(默认 0,非负)、`length`(默认 5000,1..50000)、`engine`(`auto`/`direct`/`browser`)、`timeout`(正整数 ≤600);返回 `[skip, skip+length)` 纯文本切片;截断时(精确判断 `skip+length < 全文长度`)尾部追加提示;`engine` 映射 `direct`→`X-Engine: curl`、`browser`→`X-Engine: browser`、`auto`→不传。
+- **提示词模板**:非 http(s) uri 返回自包含模板(curl 示例 + 逐项参数解释);端点地址经 `config.serverUrl`(`SERVER_URL`,默认 `http://localhost:18081`)渲染;参数对齐 MCP 功能(`x-engine`/`x-retain-links: all`/`x-retain-images: all`);行为锚定:保留全部链接/图片 URL、不递归嵌套解析。
+- **timeout 体系**:三层 —— jina 内部抓取(`x-timeout` ≤180s,软,透传)、HTTP 层整体(`X-Read-Timeout` header > env `READ_TIMEOUT` > 90s,硬,超时 504)、MCP 参数(`timeout` ≤600,硬,超时返回可读错误文本);MCP timeout 语义 = 加载 web + 解析整体预算;整体预算 clamp-180 透传为 jina `x-timeout`;timeout 不参与缓存键;缓存命中不消耗预算。
+- **search 工具**:行为不变(锚定:type 默认 ai、count 钳制、freshness 回退、异常返回错误文本);不加 timeout 参数。
+- **描述 env 化**:`src/config.ts` 建 `mcpDesc` 结构,显式枚举工具与参数描述,类型安全;`createMcpServer` 经 deps 注入 `description`/`describe()`;env 名 `MCP_SEARCH_DESC`/`MCP_SEARCH_TYPE`/`MCP_SEARCH_QUERY`/`MCP_SEARCH_COUNT`/`MCP_SEARCH_FRESHNESS`/`MCP_SEARCH_INCLUDE`(单数)/`MCP_SEARCH_EXCLUDE`、`MCP_READ_DESC`/`MCP_READ_URI`/`MCP_READ_SKIP`/`MCP_READ_LENGTH`/`MCP_READ_ENGINE`/`MCP_READ_TIMEOUT`。
+- **配置新增**:`SERVER_URL`、`READ_TIMEOUT`、`READ_CACHE_TTL`;docker-compose 补 env 注释。
+- **README 手册化**:介绍/快速开始/配置/API/文件解析(上传)/缓存与超时/开发/参考;文件解析章节与提示词模板内容一致(模板不内嵌"见 README",但章节是权威依据)。
+- **MCP self-call**:`read` 工具内部经 `http://127.0.0.1:PORT/r/<uri>` 复用 HTTP 层(带 `X-Read-Timeout`、`X-Engine` header),命中同一缓存。
 
 ## Testing Decisions
 
-- **好测试的标准**:只测外部可观测行为(HTTP 契约:状态码、JSON 结构、错误信息),不测内部实现细节。
-- **测试接缝(单一)**:整合服务器的 HTTP 路由层,用 supertest(镜像自带)直接打 koa app。重点覆盖:
-  - `search/web` 与 `search/ai` 的契约:`query` 必填校验、`count` 钳制、`freshness` 回退、include/exclude 透传、成功响应的 JSON 结构(WebPage / AiSearchResult 字段)。
-  - 错误路径:bocha 返回非 200、响应不可解析、未配置 `BOCHA_API_KEY` 时的行为。
-- **隔离外部依赖**:bocha 的 `fetch` 在测试中 mock,不依赖真实网络与真实密钥。
-- **容器内冒烟(不进常规单测)**:`read/` 的 jina 抓取依赖容器内 Chrome 渲染,`mcp/` 与 `sse/` 为协议握手,由开发/发布前在容器内冒烟验证。
-- **先例**:镜像自带 supertest 与 c8 测试基础设施,可复用作测试运行器。
+- **好测试的标准**:只测外部可观测行为(HTTP 契约 / 工具返回文本 / 缓存命中行为),不测内部实现细节。
+- **主 seam(一个)**:HTTP 路由层 —— 用 supertest 直接打 koa app(现有先例 `test/search.http.test.js`),mock bocha 与 jina 桥接。覆盖:search 契约、read 路由(query 保留 / `POST` 上传 / 非 http(s) 模板 fallback / 缓存命中与失效 / `X-Read-Timeout` 超时 / health)。
+- **纯逻辑单测(非 seam)**:切片、截断提示、模板渲染(`SERVER_URL` 注入)、参数 zod schema、`mcpDesc` env 覆盖 —— 抽为纯函数/结构直接单测,不经 MCP 传输。
+- **容器冒烟(不进常规单测)**:MCP streamable/SSE 传输握手、read 工具经真实 MCP 调用、jina 真实抓取、上传解析 header 行为(`docs/smoke-test.md` 扩展)。
+- **隔离外部依赖**:bocha fetch、jina 桥接、文件上传在单测中 mock,不依赖真实网络/密钥/容器内 Chrome。
 
 ## Out of Scope
 
-- `read` 的高级抓取参数(targetSelector、waitUntil、maxImages、ignoreSelector 等)。
-- `read` 的 `file://` 本地文件支持。
-- `read` 的 SSRF 防护。
-- sqlite 缓存的实际接入(search/read 结果缓存与 TTL)。
-- serper 等其他搜索源接入。
-- MCP 多会话(session 管理)、OAuth。
-- 与官方 jina reader HTTP 接口的向后兼容。
+- 非 http(s) 协议下载器(file/ftp/s3/对象存储等)及其抽象层(ADR-0006 否决;统一走提示词模板 + 上传解析)。
+- MCP 工具 base64/bytes 参数、MCP prompts 机制、上传鉴权/大小限额(维持原汁原味)。
+- `cf-browser-rendering` engine(暂保持三枚举)。
+- search 工具 timeout 参数、search 描述国际化(env 化已覆盖自定义,国际化未做)。
+- 缓存磁盘配额/多级缓存(仅一级缓存 + 定时清理)。
 
 ## Further Notes
 
-- 开发环境直接使用 jina 镜像,代码编辑/构建/运行都在容器内完成,避免环境漂移。
-- 参考实现 `xyz-mcp-hub` 的 `BochaClient`/`BochaTools` 提供了 bocha 客户端与工具层的完整范本,照搬其语义。
-- `BOCHA_API_KEY` 宿主环境已有值,compose 直接透传。
-- 领域术语与架构决策见 `CONTEXT.md` 与 `docs/adr/0001-0003`。
+- 领域术语见 `CONTEXT.md`;ADR-0004~0007 是本 spec 的架构依据;完整定稿见 `.scratch/search-reader-mcp/v7-read-cache-mcp.md`。
+- 实现拆分与依赖见 `.scratch/search-reader-mcp/issues/`(每个 ticket 独立文件,按 Blocked by 解耦以支持并行)。
+- 实现期需实测:bodyParser 对 `/read/**` multipart 的行为、`req.url` 改写时 query 透传、docker exec 列 jina koaApp 实际路由清单、上传解析对 header 的实际支持。
+- 建议实施顺序:config → (cache ‖ search 描述 env ‖ compose) → (route-mount ‖ mcp-read) → readme → smoke-test。
