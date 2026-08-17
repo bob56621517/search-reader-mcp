@@ -2,20 +2,39 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { BochaClient } from '../bocha/client';
 import { AiSearchResult, WebPage } from '../bocha/types';
+import type { Config } from '../config';
+import {
+  type ReadEngine,
+  DEFAULT_READ_LENGTH,
+  buildReadSchema,
+  isHttpScheme,
+  renderUploadTemplate,
+  resolveReadTimeout,
+  sliceText,
+} from './read-tools';
 
 /**
  * MCP 服务层(官方 SDK)。暴露两个工具:
  *  - search:type 默认 ai(web/ai 合一),工具层预设默认值并格式化
- *  - read:url(http/https),复用本服务 read/ 路由
+ *  - read:uri + skip/length/engine/timeout,复用本服务 read/ 路由;非 http(s) 返回上传引导模板
  */
+
+export interface ReadUrlOptions {
+  engine?: ReadEngine;
+  timeout?: number;
+}
 
 export interface McpToolDeps {
   bocha: BochaClient;
-  readUrl(url: string): Promise<string>;
+  /** 配置:serverUrl 渲染模板、readTimeout 默认链、mcpDesc 描述注入 */
+  config: Pick<Config, 'serverUrl' | 'readTimeout' | 'mcpDesc'>;
+  /** self-call 复用本服务 read/ 路由;返回全文 Markdown,MCP 层做切片 */
+  readUrl(url: string, opts?: ReadUrlOptions): Promise<string>;
 }
 
 export function createMcpServer(deps: McpToolDeps): McpServer {
   const server = new McpServer({ name: 'search-reader-mcp', version: '0.1.0' });
+  const desc = deps.config.mcpDesc;
 
   server.tool(
     'search',
@@ -51,9 +70,24 @@ export function createMcpServer(deps: McpToolDeps): McpServer {
 
   server.tool(
     'read',
-    '将网页或 PDF(URL)转换为 Markdown 正文返回。例:url=https://example.com 返回该网页的 Markdown 正文。',
-    { url: z.string().describe('要读取的网页/PDF 地址(http/https)') },
-    async ({ url }) => textResult(await deps.readUrl(url)),
+    desc.read.description,
+    buildReadSchema(desc.read),
+    async ({ uri, skip, length, engine, timeout }) => {
+      try {
+        // scheme 分流:非 http(s) 不抓取,返回自包含上传引导模板
+        if (!isHttpScheme(uri)) {
+          return textResult(renderUploadTemplate(deps.config.serverUrl));
+        }
+        const full = await deps.readUrl(uri, {
+          engine: engine ?? 'auto',
+          timeout: resolveReadTimeout(timeout, deps.config.readTimeout),
+        });
+        return textResult(sliceText(full, skip ?? 0, length ?? DEFAULT_READ_LENGTH));
+      } catch (e) {
+        // 超时/网络异常转可读错误文本,不抛错;非 Error 也转 String 而非字面 undefined
+        return textResult(e instanceof Error ? e.message : String(e));
+      }
+    },
   );
 
   return server;

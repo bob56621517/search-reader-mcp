@@ -7,7 +7,8 @@ import { CacheDb } from './cache/sqlite';
 import { Config } from './config';
 import { JinaReaderBridge } from './jina/reader';
 import { DailyLogger } from './log/daily';
-import { createMcpServer } from './mcp/server';
+import { ReadUrlOptions, createMcpServer } from './mcp/server';
+import { engineHeaderValue } from './mcp/read-tools';
 
 /**
  * 整合服务器(ADR-0001):单端口承载 read/、search/、mcp/、sse/。
@@ -38,14 +39,24 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
   const jina = deps.jina ?? null;
 
   // readUrl:供 MCP read 工具复用本服务 read/ 路由(self-call,路径即 url)
-  const readUrl = async (url: string): Promise<string> => {
+  // opts.engine 映射 X-Engine header(direct→curl、browser→browser、auto→不传);
+  // opts.timeout 为整体预算,以 X-Read-Timeout 传给 HTTP 层(缺省由 config.readTimeout 兜底);
+  // 非 2xx(含 504 超时)转可读错误文本,不抛错,由 MCP 层返回。
+  const readUrl = async (url: string, opts: ReadUrlOptions = {}): Promise<string> => {
     if (!jina) return READ_UNAVAILABLE;
-    const res = await fetch(`http://127.0.0.1:${config.port}/r/${encodeURIComponent(url)}`);
+    const headers: Record<string, string> = {};
+    const engine = engineHeaderValue(opts.engine);
+    if (engine) headers['X-Engine'] = engine;
+    if (opts.timeout !== undefined) headers['X-Read-Timeout'] = String(opts.timeout);
+    const res = await fetch(`http://127.0.0.1:${config.port}/r/${encodeURIComponent(url)}`, { headers });
+    if (res.status >= 400) {
+      return `读取失败:HTTP ${res.status}${res.statusText ? ' ' + res.statusText : ''}`;
+    }
     return res.text();
   };
 
   // MCP server 工厂:每传输/每会话独立实例,避免单 Server 多 connect 互相覆盖(SDK 单传输语义)
-  const makeMcp = () => createMcpServer({ bocha, readUrl });
+  const makeMcp = () => createMcpServer({ bocha, readUrl, config });
 
   // mcp/ 走 streamable HTTP(独立实例);有状态会话,sessionId 由服务端生成
   const mcpTransport = new StreamableHTTPServerTransport({
