@@ -288,13 +288,9 @@ curl -X POST http://localhost:18081/read \
 
 ## 开发
 
-开发环境**直接使用 jina 镜像**(复用 Node 24 + Chrome + 依赖)。
+开发/构建/测试在**宿主**完成(代码改动走 git worktree 隔离,容器仅用于冒烟验证,见 [冒烟测试](./docs/smoke-test.md)):
 
 ```bash
-# 开发容器:挂载工作区 + tsc --watch + node --watch 热重载(端口 18082 映射到容器 18081)
-docker compose up dev
-
-# 或手动:宿主构建 + 单测,容器内验证
 npm install                 # 宿主开发/测试依赖(koa/supertest 等已在 devDependencies)
 npm test                    # tsc + HTTP 契约测试 + 纯逻辑单测
 npm run build               # 构建到 dist/
