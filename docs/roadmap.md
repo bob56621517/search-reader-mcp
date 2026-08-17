@@ -5,6 +5,8 @@
 ## 1. 优化 search 工具描述
 
 优化 MCP `search` 工具的 `description`,更精确地引导模型使用:默认 `ai` 语义搜索的适用场景、何时显式切 `type="web"`、以及 `type`/`freshness`/`include`/`exclude` 各参数的语义与边界,提升工具被正确调用的质量。
+mcp ulr 国际化,支持通过 url 把工具定义文本转换为多国语言,计划支持 中英双语  
+计划支持自定义工具描述定义
 
 ## 2. 重构 read 工具描述
 
