@@ -1,8 +1,9 @@
 # 01 · 配置层新增字段与 mcpDesc 结构
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by:
+<!-- 实现备注(2026-08-17):commit cf03ffe 已合入 feat/v7-read-cache-mcp;read 缺省描述为 v7「四」新工具参数设计的内建文本(非现 url 单参版),04/05 落地时须经 config.mcpDesc 注入而非另写字符串。 -->
 
 ## 目标
 
