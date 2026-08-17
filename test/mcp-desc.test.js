@@ -27,7 +27,11 @@ function fakeBocha() {
 
 /** 构造 server + in-memory client(自定 bocha),返回已连通的 client */
 async function connect(bocha, desc) {
-  const server = createMcpServer({ bocha, readUrl: async () => 'md', searchDesc: desc.search });
+  const server = createMcpServer({
+    bocha,
+    readUrl: async () => 'md',
+    config: { serverUrl: 'http://localhost:18081', readTimeout: 90, mcpDesc: desc },
+  });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   const client = new Client({ name: 'test', version: '0.0.1' });

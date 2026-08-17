@@ -1,8 +1,9 @@
 # 04 · MCP read 工具增强:uri/skip/length/engine/timeout + 切片 + 截断 + 模板 + 描述注入
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
+<!-- 实现备注(2026-08-17):commit 3becb05 已实现,merge 8245bbf 解决与 05(searchDesc→config 收敛)的冲突。纯逻辑单测 test/mcp-read.test.js 覆盖切片/截断/模板渲染/schema 越界;容器冒烟(各参数/模板/截断)转 08-smoke-test 执行。 -->
 
 ## 目标
 
