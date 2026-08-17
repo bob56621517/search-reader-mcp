@@ -46,7 +46,7 @@ test('mcpDesc 缺省即内建描述(工具 + 全部参数)', () => {
   assert.match(search.include, /限定网站范围/);
   assert.match(search.exclude, /排除网站范围/);
   // read:工具 + uri/skip/length/engine/timeout
-  assert.match(read.description, /将网页或 PDF/);
+  assert.match(read.description, /agent 读取工具/);
   assert.match(read.uri, /要读取的资源地址/);
   assert.match(read.skip, /跳过开头字符数/);
   assert.match(read.length, /返回切片长度/);
@@ -99,7 +99,7 @@ test('mcpDesc env 只覆盖有值的项,其余回退内建', () => {
   assert.match(desc.search.description, /博查/);
   assert.match(desc.search.query, /搜索关键词/);
   assert.equal(desc.read.engine, '仅覆盖引擎');
-  assert.match(desc.read.description, /将网页或 PDF/);
+  assert.match(desc.read.description, /agent 读取工具/);
   assert.match(desc.read.length, /返回切片长度/);
 });
 

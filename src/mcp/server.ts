@@ -48,6 +48,12 @@ export function createMcpServer(deps: McpToolDeps): McpServer {
       include: z.string().optional().describe(searchDesc.include),
       exclude: z.string().optional().describe(searchDesc.exclude),
     },
+    {
+      title: '联网搜索(博查)',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     async ({ type, query, count, freshness, include, exclude }) => {
       const n = Math.max(1, Math.min(50, count ?? 20));
       const fresh = freshness || 'noLimit';
@@ -67,6 +73,12 @@ export function createMcpServer(deps: McpToolDeps): McpServer {
     'read',
     desc.read.description,
     buildReadSchema(desc.read),
+    {
+      title: '读取网页或文件(jina)',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     async ({ uri, skip, length, engine, timeout }) => {
       try {
         // scheme 分流:非 http(s) 不抓取,返回自包含上传引导模板

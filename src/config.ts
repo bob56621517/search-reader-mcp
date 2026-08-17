@@ -84,7 +84,7 @@ const DEFAULT_MCP_DESC: McpDesc = {
   },
   read: {
     description:
-      '将网页或 PDF(http/https)转换为 Markdown 正文返回,支持分片续读、引擎与超时控制。uri 传要读取的资源地址,非 http(s) 资源返回可执行的上传引导模板。',
+      'agent 读取工具:读取 uri 并转换为 Markdown 文本。远程 url(http(s)://)由服务端直接抓取转换;本地文件请先在本地下载,再按返回的上传引导模板,用 POST /read 上传解析取回,上传解析支持 web(.html)、Word(.doc/.docx)、Excel(.xls/.xlsx)、PowerPoint(.ppt/.pptx)。',
     uri: '要读取的资源地址(http/https 网页或 PDF);其他 scheme(file/ftp/data 等)返回可执行的上传引导模板',
     skip: '跳过开头字符数(默认 0),用于分片续读长文',
     length: '返回切片长度(默认 5000,上限 50000);全文不足时不截断',
