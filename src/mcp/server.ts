@@ -26,7 +26,7 @@ export interface ReadUrlOptions {
 
 export interface McpToolDeps {
   bocha: BochaClient;
-  /** 配置:serverUrl 渲染模板、readTimeout 默认链、mcpDesc 描述注入 */
+  /** 配置:serverUrl 渲染模板、readTimeout 默认链、mcpDesc 描述注入(search/read 均取自 config.mcpDesc) */
   config: Pick<Config, 'serverUrl' | 'readTimeout' | 'mcpDesc'>;
   /** self-call 复用本服务 read/ 路由;返回全文 Markdown,MCP 层做切片 */
   readUrl(url: string, opts?: ReadUrlOptions): Promise<string>;
@@ -35,23 +35,18 @@ export interface McpToolDeps {
 export function createMcpServer(deps: McpToolDeps): McpServer {
   const server = new McpServer({ name: 'search-reader-mcp', version: '0.1.0' });
   const desc = deps.config.mcpDesc;
+  const searchDesc = desc.search;
 
   server.tool(
     'search',
-    '博查(bocha)搜索 MCP 工具。type 缺省为 ai(AI 语义搜索):除网页来源外还返回大模型总结答案、追问问题与垂域模态卡,适合事实问答/综述;需要排除特定网站或只要裸网页列表时显式 type="web"。返回的网页来源请在回答末尾把 URL 渲染为超链接附上,便于用户溯源。',
+    searchDesc.description,
     {
-      type: z
-        .enum(['ai', 'web'])
-        .optional()
-        .describe('搜索类型:ai(默认,AI 语义搜索,含总结/追问/模态卡)或 web(网页长摘要列表,支持 exclude)'),
-      query: z.string().describe('搜索关键词'),
-      count: z.number().int().optional().describe('返回条数上限,默认 20,最大 50(越界自动钳制)'),
-      freshness: z
-        .string()
-        .optional()
-        .describe('时效:noLimit(默认)/oneDay/oneWeek/oneMonth/oneYear,或 YYYY-MM-DD..YYYY-MM-DD 日期范围'),
-      include: z.string().optional().describe('限定网站范围:根域名或子域名,多个用 | 或 , 分隔,最多 100 个;web/ai 均支持'),
-      exclude: z.string().optional().describe('排除网站范围:同上;仅 type="web" 生效'),
+      type: z.enum(['ai', 'web']).optional().describe(searchDesc.type),
+      query: z.string().describe(searchDesc.query),
+      count: z.number().int().optional().describe(searchDesc.count),
+      freshness: z.string().optional().describe(searchDesc.freshness),
+      include: z.string().optional().describe(searchDesc.include),
+      exclude: z.string().optional().describe(searchDesc.exclude),
     },
     async ({ type, query, count, freshness, include, exclude }) => {
       const n = Math.max(1, Math.min(50, count ?? 20));
