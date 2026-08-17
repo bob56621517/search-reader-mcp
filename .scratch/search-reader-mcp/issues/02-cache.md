@@ -49,3 +49,8 @@ Blocked by: 01
 - `test/cache.test.js` 10 用例:写入/命中/过期重抓/滑动续期/兜底清理只删过期/in-flight 同键只抓一次/engine 独立/失败不写缓存/重复 put 覆盖/命中不调 loader;全量 35/35 通过。
 
 handleRead 的缓存接入(engine 取 `X-Engine` 头归一化、miss 走 jina 抓取、`POST /read` 不缓存、timeout)由 03 承接。已 merge --no-ff 回基线 `feat/v7-read-cache-mcp`。
+
+## 实测发现(08 冒烟回填)
+
+- **缓存写 expire 基准缺陷**:`getOrFetchRead` 写缓存时 `putRead(uri, engine, content, ttlMs, now)` 的 `now` 是**请求开始时刻**(参数默认值),非写入完成时刻;loader(抓取)耗时 ≥ TTL 时,`expire_at = 请求开始 + TTL` 已过期 → 写入即失效。生产 TTL=300 影响小;短 TTL(如 5s)可触发(冒烟 `READ_CACHE_TTL=5` 复现)。**修复建议**:调 `putRead` 时改传 `Date.now()`,并同步调整 `test/cache.test.js`「缓存过期后重新加载」对「loader 立即完成」的假设。是否由 08 分支修复待定。
+- 容器冒烟(compose TTL=300)已验证:命中瞬时(ms 级)、滑动续期(命中后 `expire_at` 刷新为 now+300)、query 作缓存键(`?x=1` 独立条目)、过期惰性删除重抓——见 `docs/smoke-test.md` §4.3。

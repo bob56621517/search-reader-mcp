@@ -66,11 +66,15 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
   // MCP server 工厂:每传输/每会话独立实例,避免单 Server 多 connect 互相覆盖(SDK 单传输语义)
   const makeMcp = () => createMcpServer({ bocha, readUrl, config });
 
-  // mcp/ 走 streamable HTTP(独立实例);有状态会话,sessionId 由服务端生成
-  const mcpTransport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => crypto.randomUUID(),
-  });
-  await makeMcp().connect(mcpTransport);
+  // mcp/ 走 streamable HTTP(无状态模式):不生成 sessionId,每次请求独立 transport + server。
+  // read/search 均为纯请求-响应,无跨调用状态需求;无状态天然支持多客户端,也规避了有状态
+  // 单例实例的会话残留(旧实现首个会话 initialize 后,新会话被 400 拒 "Server already initialized")。
+  // SSE(/sse)为 legacy 兼容保留:连接即会话,天然按连接隔离、支持多客户端,无需无状态化。
+  const handleMcp = async (ctx: Koa.Context, parsedBody: unknown): Promise<void> => {
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await makeMcp().connect(transport);
+    await transport.handleRequest(ctx.req, ctx.res, parsedBody);
+  };
 
   // sse/ 为 legacy SSE:每个 GET /sse 建立独立 server + 传输
   const sseSessions = new Map<string, SSEServerTransport>();
@@ -104,7 +108,7 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
           return;
         }
         ctx.respond = false;
-        await mcpTransport.handleRequest(ctx.req, ctx.res, (ctx.request as any).body);
+        await handleMcp(ctx, (ctx.request as any).body);
         return;
       }
       // ---- MCP legacy SSE ----
