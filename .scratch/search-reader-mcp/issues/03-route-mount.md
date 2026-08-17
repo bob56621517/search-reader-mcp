@@ -1,7 +1,7 @@
 # 03 · Jina 全量路由挂载 + query 保留 + bodyParser 分流 + 缓存接入 + timeout header
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 02
 
 ## 目标
@@ -38,3 +38,17 @@ Blocked by: 02
 4. **合并回基线**:`git merge --no-ff` 合并回 `feat/v7-read-cache-mcp`;同文件冲突(多 ticket 改同一文件)由后合并者解决;完成后更新本 ticket `Status: resolved`。
 5. **全部完成后**:协调会话将基线统一合并进 `main`(期间不逐个合 main)。
 6. **push 与交接**:任务中断或用户走开时,显式 push 到远端同名分支(`origin/feat/v7-read-cache-mcp`、`origin/feat/v7/03-route-mount`);跨会话/中断时按需留交接文档。
+
+## Answer
+
+在 `src/server.ts` 重写 `handleRead`,全量挂载 + query 保留 + 缓存接入 + timeout:
+
+- **全量挂载**:`/read` → jina `/`、`/read/<rest>` → `/<rest>`;`/r` 完全同义;任意 method。无尾路径(`/read`、`/r`)透传 jina `/`(POST = 原生上传解析,不缓存);GET 带 URL 接入 `read_cache`;其余 method 透传不缓存。
+- **query 保留(fix bug)**:改写 `req.url` 时用 `ctx.querystring` 拼回原始 query string(缓存键 uri = 完整 URL 含 query)。
+- **bodyParser 分流**:`@koa/bodyparser` 默认 enableTypes json/form 本就吞不掉 multipart,仍显式放行 `/read/**` 的 multipart(不解析、不消耗 stream),JSON 留给 search。
+- **缓存接入**:键 = `uri(含 query)+ engine 归一化`(auto/browser/curl,复用 read-tools `normalizeEngine`);命中直接返回全文(不占 timeout 预算);miss 经 `jinaFetch` 捕获 jina 响应,仅 200 写缓存;非 200 原样透传 status/body(不缓存);`POST /read` 上传不缓存。
+- **timeout**:所有路径统一走 `jinaFetch`(含上传/POST,整体硬超时 `X-Read-Timeout` header > env `READ_TIMEOUT`,超时 504);整体预算 clamp 到 180 透传为 jina `x-timeout`;超时不写缓存(loader 抛错不写)。
+- **捕获替身**:`CaptureResponse` 最小 ServerResponse 实现(statusCode/headers/body + settledPromise);真实 jina 响应形态留容器冒烟(`docs/smoke-test.md`)验证。
+- **测试**:`test/read.http.test.js` 14 用例(query 保留 / 上传透传 / 缓存命中与 engine 隔离 / TTL 过期重抓 / 非 200 不缓存 / GET+POST 超时 504 / 503);`search.http.test.js` 更新无尾路径断言(400→503)。全量 71/71 通过。
+
+已 merge --no-ff 回基线 `feat/v7-read-cache-mcp`。
