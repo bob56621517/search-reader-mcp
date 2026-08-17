@@ -246,10 +246,10 @@ test('read 无 jina 桥接时返回 503', async () => {
   await request(app.callback()).get('/read/' + encodeURIComponent('https://a.com')).expect(503);
 });
 
-test('read 缺少 url(无路径段)返回 400', async () => {
+test('read 无尾路径全量挂载透传 jina /,无 jina 时返回 503(v7#03)', async () => {
   const app = await makeApp();
-  await request(app.callback()).get('/r').expect(400);
-  await request(app.callback()).get('/read').expect(400);
+  await request(app.callback()).get('/r').expect(503);
+  await request(app.callback()).get('/read').expect(503);
 });
 
 test('精确匹配端点兼容尾斜杠(/health/ 等价 /health)', async () => {
