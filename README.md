@@ -43,11 +43,19 @@
 
 ```bash
 # 前提:宿主已有环境变量 BOCHA_API_KEY(搜索必需)
-docker compose up -d --build
+docker compose up -d --build search-reader-mcp
 # 访问 http://localhost:18081
 ```
 
-默认值集中在 `docker-compose.yml`,按需手工修改(端口、URL、路径等)。
+**命令拆解**(`docker compose up [选项] [服务名]`):
+
+| 部分 | 说明 |
+| --- | --- |
+| `up -d` | 启动服务并在**后台**运行;容器由 Docker daemon(Docker Desktop)托管,**CLI 关闭后仍继续运行**,直到 `docker compose down` |
+| `--build` | 启动前**重新构建镜像**。**改了 `src/` 源码后必须带**(否则复用旧镜像,改动不生效);仅改 `docker-compose.yml` 环境变量可省略 |
+| `search-reader-mcp` | **服务名**。`docker-compose.yml` 定义了 `search-reader-mcp`(主服务)与 `dev`(开发热重载容器)两个服务;**不带服务名会两个都启动**,指定名只启一个 |
+
+> **就绪**:容器内 headless Chrome 启动**不稳定且较慢**(常遇 jina 内部 puppeteer 10s 超时,进程退出后由 `restart: unless-stopped` 自动拉起,通常 1-2 次后成功),**需 30-60s**,以下方「启动后验证」的 health 返回 200 为准。停止用 `docker compose down`(持久数据在宿主 `~/.search_reader_mcp/`,不随容器删除)。默认值集中在 `docker-compose.yml`,按需手工修改(端口、URL、路径等)。
 
 ### docker run
 
@@ -75,7 +83,7 @@ curl http://localhost:18081/health
 | `SEARCH_READER_MCP_DATA` | `/app/extension/data` | 持久化数据目录(compose 外挂宿主 `~/.search_reader_mcp/`) |
 | `SQLITE_PATH` | `<dataDir>/cache.db` | sqlite 缓存库路径 |
 | `LOG_DIR` | `<dataDir>/.log` | 日志目录(按天滚动) |
-| `READ_CACHE_TTL` | `300` | read 缓存 TTL(秒),命中后滑动续期;见 [缓存与超时](#缓存与超时) |
+| `READ_CACHE_TTL` | `600` | read 缓存 TTL(秒,默认 10 分钟),命中后滑动续期;见 [缓存与超时](#缓存与超时) |
 | `READ_TIMEOUT` | `90` | HTTP 层整体超时兜底(秒),超时 504;见 [缓存与超时](#缓存与超时) |
 | `SERVER_URL` | `http://localhost:18081` | 服务端对外地址,用于上传解析提示词模板渲染;云部署改为公网地址 |
 | `MCP_*` | 内建描述 | MCP 工具/参数描述 env 覆盖,见下 |
@@ -160,8 +168,8 @@ curl -X POST http://localhost:18081/search/ai \
 
 ### MCP(工具 `search`、`read`)
 
-- **streamable HTTP**:`POST /mcp`(协议:JSON-RPC + SSE 流,服务端生成 `Mcp-Session-Id`)
-- **legacy SSE**:`GET /sse` 建流,`POST /messages` 发请求
+- **streamable HTTP**:`POST /mcp`(协议:JSON-RPC,**无状态模式**:不生成/不要求 `Mcp-Session-Id`,每次请求独立,天然支持多客户端)
+- **legacy SSE**:`GET /sse` 建流,`POST /messages` 发请求(连接级会话,每连接独立)
 
 **Claude Code 接入示例**(`~/.claude.json` 或项目 `.mcp.json`):
 
@@ -256,7 +264,7 @@ curl -X POST http://localhost:18081/read \
 | 项 | 行为 |
 | --- | --- |
 | 缓存键 | `uri(含 query)+ engine`;engine 归一化为 `auto`/`browser`/`curl` 三值 |
-| TTL | `READ_CACHE_TTL`(默认 300s),命中后**滑动续期**(`expire_at = now + TTL`) |
+| TTL | `READ_CACHE_TTL`(默认 600s,10 分钟),命中后**滑动续期**(`expire_at = now + TTL`;写缓存基准 = 写入完成时刻) |
 | 清理 | 惰性删除(访问到过期即删重抓)+ **每小时定时兜底清理**(仅删过期行) |
 | in-flight 去重 | 同键并发只抓一次(共享进行中 Promise),完成后移除;不同 engine 互不等待 |
 | 只缓存成功响应 | jina 非 200 / 超时不写缓存,避免缓存坏结果 |
