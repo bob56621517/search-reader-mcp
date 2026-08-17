@@ -1,8 +1,9 @@
 # 05 · MCP search 工具描述 env 化
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
+<!-- 实现备注(2026-08-17):commit 56b3bc1(merge 91012d6)已合入 feat/v7-read-cache-mcp。search 工具 description 与全部参数 describe 已经 config.mcpDesc.search 注入(env MCP_SEARCH_* 可覆盖,缺省回退内建),search 逻辑/行为不变;新增 test/mcp-desc.test.js 6 项单测(env 覆盖/缺省回退/行为不变)全过(31/31)。read 描述 env 化归属 04-mcp-read(本 ticket 未触碰);04 落地时须经 config.mcpDesc.read 注入而非另写字符串。 -->
 
 ## 目标
 
