@@ -45,7 +45,7 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
   };
 
   // MCP server 工厂:每传输/每会话独立实例,避免单 Server 多 connect 互相覆盖(SDK 单传输语义)
-  const makeMcp = () => createMcpServer({ bocha, readUrl });
+  const makeMcp = () => createMcpServer({ bocha, readUrl, searchDesc: config.mcpDesc.search });
 
   // mcp/ 走 streamable HTTP(独立实例);有状态会话,sessionId 由服务端生成
   const mcpTransport = new StreamableHTTPServerTransport({

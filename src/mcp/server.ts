@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { BochaClient } from '../bocha/client';
 import { AiSearchResult, WebPage } from '../bocha/types';
+import type { McpDesc } from '../config';
 
 /**
  * MCP 服务层(官方 SDK)。暴露两个工具:
@@ -12,27 +13,24 @@ import { AiSearchResult, WebPage } from '../bocha/types';
 export interface McpToolDeps {
   bocha: BochaClient;
   readUrl(url: string): Promise<string>;
+  /** search 工具/参数描述(经 config.mcpDesc 注入,env 可覆盖,缺省内建) */
+  searchDesc: McpDesc['search'];
 }
 
 export function createMcpServer(deps: McpToolDeps): McpServer {
   const server = new McpServer({ name: 'search-reader-mcp', version: '0.1.0' });
 
+  const { searchDesc } = deps;
   server.tool(
     'search',
-    '博查(bocha)搜索 MCP 工具。type 缺省为 ai(AI 语义搜索):除网页来源外还返回大模型总结答案、追问问题与垂域模态卡,适合事实问答/综述;需要排除特定网站或只要裸网页列表时显式 type="web"。返回的网页来源请在回答末尾把 URL 渲染为超链接附上,便于用户溯源。',
+    searchDesc.description,
     {
-      type: z
-        .enum(['ai', 'web'])
-        .optional()
-        .describe('搜索类型:ai(默认,AI 语义搜索,含总结/追问/模态卡)或 web(网页长摘要列表,支持 exclude)'),
-      query: z.string().describe('搜索关键词'),
-      count: z.number().int().optional().describe('返回条数上限,默认 20,最大 50(越界自动钳制)'),
-      freshness: z
-        .string()
-        .optional()
-        .describe('时效:noLimit(默认)/oneDay/oneWeek/oneMonth/oneYear,或 YYYY-MM-DD..YYYY-MM-DD 日期范围'),
-      include: z.string().optional().describe('限定网站范围:根域名或子域名,多个用 | 或 , 分隔,最多 100 个;web/ai 均支持'),
-      exclude: z.string().optional().describe('排除网站范围:同上;仅 type="web" 生效'),
+      type: z.enum(['ai', 'web']).optional().describe(searchDesc.type),
+      query: z.string().describe(searchDesc.query),
+      count: z.number().int().optional().describe(searchDesc.count),
+      freshness: z.string().optional().describe(searchDesc.freshness),
+      include: z.string().optional().describe(searchDesc.include),
+      exclude: z.string().optional().describe(searchDesc.exclude),
     },
     async ({ type, query, count, freshness, include, exclude }) => {
       const n = Math.max(1, Math.min(50, count ?? 20));
