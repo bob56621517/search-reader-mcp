@@ -13,7 +13,7 @@ services:
       BOCHA_URL: "https://api.bochaai.com"
       JINA_APP: "/app"                         # jina 镜像应用根目录
       # ---- 一期增强(v7)新增 env ----
-      READ_CACHE_TTL: "300"                    # read 缓存 TTL(秒),命中后滑动续期
+      READ_CACHE_TTL: "600"                    # read 缓存 TTL(秒),命中后滑动续期(默认 10 分钟)
       READ_TIMEOUT: "90"                       # HTTP 层整体超时兜底(秒),超时 504
       SERVER_URL: "http://localhost:18081"     # 服务端对外地址(上传解析提示词模板渲染用;云部署改为公网地址)
       # MCP_* 描述 env:缺省 = 内建工具/参数描述,有值即覆盖。

@@ -163,20 +163,44 @@ test('缓存命中时 loader 不被调用(瞬时返回)', async () => {
 test('getOrFetchRead 缓存过期后重新加载(惰性重抓)', async () => {
   const { db, dir } = tmpDb();
   try {
+    // 写入基准为写入完成时刻(真实时间),故用真实等待模拟过期
+    const TTL_SHORT = 120; // ms
     let calls = 0;
     const loader = async () => {
       calls++;
       return 'v' + calls;
     };
-    // t=0 miss → loader 抓取并写缓存(expire = 0 + TTL)
-    assert.equal(await db.getOrFetchRead('https://a.com', 'auto', TTL, loader, 0), 'v1');
+    // miss → loader 抓取并写缓存(expire = 写入完成 + TTL)
+    assert.equal(await db.getOrFetchRead('https://a.com', 'auto', TTL_SHORT, loader), 'v1');
     assert.equal(calls, 1);
     // 有效期内命中,不再 loader
-    assert.equal(await db.getOrFetchRead('https://a.com', 'auto', TTL, loader, 500), 'v1');
+    assert.equal(await db.getOrFetchRead('https://a.com', 'auto', TTL_SHORT, loader), 'v1');
     assert.equal(calls, 1);
-    // 过期后惰性删除并重新 loader
-    assert.equal(await db.getOrFetchRead('https://a.com', 'auto', TTL, loader, 1500), 'v2');
+    // 等 TTL 过期后惰性删除并重新 loader
+    await new Promise((r) => setTimeout(r, TTL_SHORT + 80));
+    assert.equal(await db.getOrFetchRead('https://a.com', 'auto', TTL_SHORT, loader), 'v2');
     assert.equal(calls, 2);
+  } finally {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('loader 耗时 ≥ TTL 时写缓存不失效(写入用完成时刻)', async () => {
+  const { db, dir } = tmpDb();
+  try {
+    const TTL_SMALL = 50; // ms
+    let calls = 0;
+    const slow = async () => {
+      calls++;
+      await new Promise((r) => setTimeout(r, 120)); // loader 耗时 120ms > TTL 50ms
+      return 'v' + calls;
+    };
+    // miss → loader(120ms)写缓存;修复前 expire_at = 请求开始 + 50,写入瞬间已过期 → 写入即失效
+    assert.equal(await db.getOrFetchRead('https://slow.com', 'auto', TTL_SMALL, slow), 'v1');
+    // 写入完成后立即再取:应命中缓存(写入完成 + TTL 仍有效),loader 不再执行
+    assert.equal(await db.getOrFetchRead('https://slow.com', 'auto', TTL_SMALL, slow), 'v1');
+    assert.equal(calls, 1); // 修复前此断言失败(calls=2,第二次重新 loader)
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });

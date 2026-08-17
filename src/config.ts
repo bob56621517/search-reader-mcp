@@ -24,7 +24,7 @@ export interface Config {
   logDir: string;
   /** 服务端对外地址(提示词模板渲染端点),默认 http://localhost:18081 */
   serverUrl: string;
-  /** read 缓存 TTL(秒),默认 300 */
+  /** read 缓存 TTL(秒),默认 600(10 分钟) */
   readCacheTtl: number;
   /** HTTP 层整体超时兜底(秒),默认 90 */
   readTimeout: number;
@@ -143,7 +143,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sqlitePath: env.SQLITE_PATH || path.join(dataDir, 'cache.db'),
     logDir: env.LOG_DIR || path.join(dataDir, '.log'),
     serverUrl: env.SERVER_URL || 'http://localhost:18081',
-    readCacheTtl: envSeconds(env, 'READ_CACHE_TTL', 300),
+    readCacheTtl: envSeconds(env, 'READ_CACHE_TTL', 600),
     readTimeout: envSeconds(env, 'READ_TIMEOUT', 90),
     mcpDesc: buildMcpDesc(env),
   };
