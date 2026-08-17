@@ -10,7 +10,7 @@ const { loadConfig, buildMcpDesc } = require('../dist/config.js');
 test('SERVER_URL/READ_CACHE_TTL/READ_TIMEOUT 缺省时使用内建默认', () => {
   const cfg = loadConfig({});
   assert.equal(cfg.serverUrl, 'http://localhost:18081');
-  assert.equal(cfg.readCacheTtl, 300);
+  assert.equal(cfg.readCacheTtl, 600);
   assert.equal(cfg.readTimeout, 90);
 });
 
@@ -27,7 +27,7 @@ test('SERVER_URL/READ_CACHE_TTL/READ_TIMEOUT env 有值时生效', () => {
 
 test('READ_CACHE_TTL/READ_TIMEOUT 非法值(非正数)回退默认', () => {
   const cfg = loadConfig({ READ_CACHE_TTL: 'abc', READ_TIMEOUT: '-5' });
-  assert.equal(cfg.readCacheTtl, 300);
+  assert.equal(cfg.readCacheTtl, 600);
   assert.equal(cfg.readTimeout, 90);
 });
 

@@ -151,6 +151,7 @@ export class CacheDb {
    * 读缓存或加载:命中直接返回(瞬时,不占 timeout 预算);
    * miss 时经 loader 拉取并写缓存;同键并发共享同一进行中 Promise(in-flight 去重,
    * 完成后移除),不同 engine 独立等待;loader 抛错不写缓存、异常上抛。
+   * now 仅用于缓存查找时点(过期判断);写缓存的过期基准取 loader 完成时刻(Date.now())。
    */
   getOrFetchRead(
     uri: string,
@@ -167,7 +168,9 @@ export class CacheDb {
     const pending = (async () => {
       const content = await loader();
       // 只缓存成功结果:loader 抛错到不了这行,缓存不写
-      this.putRead(uri, engine, content, ttlMs, now);
+      // 写入基准 = 写入完成时刻 Date.now(),而非请求开始时刻 now(参数默认值):
+      // 若 loader(抓取)耗时 ≥ TTL,用 now 算出的 expire_at 在写入瞬间已过期 → 写入即失效(08 冒烟发现)
+      this.putRead(uri, engine, content, ttlMs, Date.now());
       return content;
     })().finally(() => {
       this.inflight.delete(key);
