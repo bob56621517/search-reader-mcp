@@ -9,7 +9,7 @@
 _Avoid_: gateway、aggregator、多端口服务
 
 **read**:
-把 URL 指向的网页/PDF 转换为 Markdown 正文的能力,底层进程内复用 jina 镜像的抓取模块;HTTP 形态为 GET `/read/<url>`(别名 `/r/<url>`),路径即 url。
+把资源转换为 LLM 友好的 Markdown 正文的能力,底层进程内复用 jina 镜像的抓取模块;HTTP 形态为 GET `/read/<url>`(别名 `/r/<url>`,路径即 url)与 POST `/read`(multipart file 上传解析)。非 http(s) 资源不直接抓取,返回提示词模板引导走上传解析。
 _Avoid_: 爬取、reader 服务
 
 **search**:
