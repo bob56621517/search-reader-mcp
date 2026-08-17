@@ -26,20 +26,3 @@ services:
       # (${HOME} 在 cmd/PowerShell 下未设置,会解析成空串导致挂载到根路径、容器内无写权限)。
       - "~/.search_reader_mcp:/app/extension/data"
     restart: unless-stopped
-
-  # 开发容器:基于 jina 镜像直接开发,挂载工作区,tsc --watch + node --watch 热重载
-  # 用法:docker compose up dev(映射 18082 以免与主服务 18081 冲突)
-  dev:
-    image: ghcr.io/jina-ai/reader:latest
-    entrypoint: ["/bin/bash"]
-    command: ["-c", "npm --prefix /app install --no-save @modelcontextprotocol/sdk && cd /app/extension && bash dev.sh"]
-    volumes:
-      - ".:/app/extension"
-    environment:
-      PORT: "18081"
-      HOST: "0.0.0.0"
-      BOCHA_API_KEY: "${BOCHA_API_KEY:-}"
-      BOCHA_URL: "https://api.bochaai.com"
-      JINA_APP: "/app"
-    ports:
-      - "18082:18081"
