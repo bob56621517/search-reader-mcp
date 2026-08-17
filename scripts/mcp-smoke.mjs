@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// MCP 冒烟:验证 /mcp(streamable HTTP)初始化、工具列表与 read/search 工具端到端调用(v7 契约)。
+// MCP 冒烟:验证 /mcp(streamable HTTP,无状态模式)初始化握手、工具列表与 read/search 工具端到端调用(v7 契约)。
+// 无状态:服务端不返回 mcp-session-id,每次请求独立;客户端无需携带 Mcp-Session-Id 头。
 // 用法:node scripts/mcp-smoke.mjs [BASE_URL]  默认 http://localhost:18081
 // 逐项断言并打印 [PASS]/[FAIL];任一项失败以 exit 1 退出(可直接作 CI 门禁)。
 import process from 'node:process';
@@ -22,32 +23,28 @@ async function rpc(method, params, extraHeaders = {}) {
     headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...extraHeaders },
     body: JSON.stringify({ jsonrpc: '2.0', id: Math.floor(Math.random() * 1e6), method, params }),
   });
-  return { sid: res.headers.get('mcp-session-id'), text: await res.text() };
+  return { res, text: await res.text() };
 }
 
 async function callTool(name, args) {
-  const r = await rpc('tools/call', { name, arguments: args }, { 'Mcp-Session-Id': sid });
+  const r = await rpc('tools/call', { name, arguments: args });
   return r.text;
 }
 
-// ---- 初始化会话 ----
+// ---- 初始化握手(无状态:不返回 mcp-session-id,验证 serverInfo 与状态码) ----
 const init = await rpc('initialize', {
   protocolVersion: '2025-03-26',
   capabilities: {},
   clientInfo: { name: 'mcp-smoke', version: '1.0' },
 });
-const sid = init.sid;
-console.log('session:', sid);
-check('initialize 返回 Mcp-Session-Id', !!sid, '未返回 mcp-session-id');
-
-await fetch(base + '/mcp', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'Mcp-Session-Id': sid },
-  body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
-});
+check(
+  'initialize 握手返回 serverInfo(无状态模式)',
+  init.res.status === 200 && /"name":"search-reader-mcp"/.test(init.text),
+  init.text.slice(0, 200),
+);
 
 // ---- tools/list ----
-const tools = await rpc('tools/list', {}, { 'Mcp-Session-Id': sid });
+const tools = await rpc('tools/list');
 check(
   'tools/list 返回 search/read',
   tools.text.includes('"search"') && tools.text.includes('"read"'),

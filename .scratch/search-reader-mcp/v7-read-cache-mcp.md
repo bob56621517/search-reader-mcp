@@ -60,6 +60,8 @@
 - 缓存命中瞬时返回,不占用 timeout 预算。
 - 改动:`src/cache/sqlite.ts`、`src/server.ts`。
 
+> **实测遗留缺陷(08 冒烟回填)**:`getOrFetchRead` 写缓存时 `putRead(uri, engine, content, ttlMs, now)` 的 `now` 取的是**请求开始时刻**(`getOrFetchRead` 参数默认值),而非写入完成时刻;当 loader(抓取)耗时 ≥ TTL 时,写出的 `expire_at = 请求开始 + TTL` 已过期 → 写入即失效。生产 TTL=300 下 loader 通常数秒,影响小;短 TTL 测试(如 5s)可触发。**修复建议**:`getOrFetchRead` 调 `putRead` 时改传 `Date.now()`(写入完成时刻),并同步调整宿主单测 `test/cache.test.js`「缓存过期后重新加载」对「loader 立即完成」的假设。
+
 ---
 
 ## 四、MCP read 工具
@@ -246,10 +248,17 @@
 
 ## 十二、遗留(实现期实测)
 
-1. bodyParser 是否吞 `/read/**` multipart stream → 实测/调整顺序。
-2. `req.url` 改写时 query string 透传正确性。
-3. docker exec 列 jina koaApp 实际路由清单,确保 `/read/**` 全量覆盖。
-4. 上传解析对 `x-engine` 等 header 的实际支持(模板据此最终定稿)。
+已在容器冒烟(`docs/smoke-test.md`)完成:
+
+1. bodyParser 是否吞 `/read/**` multipart stream → 已实测:`POST /read` 上传解析正常,multipart 原样透传(bodyParser 按 Content-Type 分流,未吞上传流)。
+2. `req.url` 改写时 query string 透传正确性 → 已实测:带 query 的 URL 正常抓取;**实测发现:jina 会清理 `utm_source` 等追踪参数**(URL Source 只显示非 utm 参数),query 保留的强断言以宿主单测为准,容器断言用非 utm 参数。
+3. docker exec 列 jina koaApp 实际路由清单 → 已实测:jina **不用 koa-router**(无 `router`/`_router`/`router.stack`),路由为 `registerRoutes()` 挂的中间件链;`serviceReady()` 后 `koaApp.middleware` 共 7 个(asyncHook / healthCheck / logging / anon CORS / compress / assets / **shimController**),核心分发是 shimController(把 path 当目标 URL)。探测命令见 smoke-test.md §6。
+4. 上传解析对 `x-engine` 等 header 的实际支持 → 已实测:HTML 上传含链接+图片,`x-retain-links`/`x-retain-images: all` 生效。
+
+**实测新发现(08 冒烟回填)**:
+
+5. **MCP transport 单例缺陷(已修复)**:`src/server.ts` 原用单个 `StreamableHTTPServerTransport` 服务所有会话,而 SDK transport 单实例只支持一个会话(`sessionId`/`_initialized` 为实例字段);首个客户端 initialize 后,新客户端 initialize 被 400 `Server already initialized` 拒 → 服务退化为单客户端。**修复**:`/mcp` 改为**无状态模式**(`sessionIdGenerator: undefined`,每次请求独立 transport + server),天然多客户端且规避会话残留;`/sse` 保持连接级会话(每连接独立 transport,按连接隔离)。官方 SDK 真实客户端双会话实测通过,`scripts/mcp-smoke.mjs` 同步适配。
+6. **缓存写 expire 基准缺陷**:见「三」末尾。
 
 ---
 

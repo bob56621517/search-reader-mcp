@@ -21,28 +21,28 @@
 ### 1. 构建镜像
 
 ```bash
-docker build -t search-reader-mcp .
+docker compose build search-reader-mcp
 ```
 
-### 2. 启动容器(带短 TTL,便于缓存验证)
+### 2. 启动容器(compose,持久化卷挂载)
 
 ```bash
-docker rm -f srm 2>/dev/null
-docker run -d --name srm -p 18081:18081 \
-  -e BOCHA_API_KEY -e PORT=18081 \
-  -e READ_CACHE_TTL=5 -e READ_TIMEOUT=90 -e SERVER_URL=http://localhost:18081 \
-  search-reader-mcp
+docker compose up -d --build search-reader-mcp
 ```
 
-`READ_CACHE_TTL=5`(秒)让缓存秒级过期,便于 4.3 验证命中/续期/失效重抓;生产默认 300 见 `docker-compose.yml`。
+compose 默认配置(见 `docker-compose.yml`):端口 18081;`READ_CACHE_TTL=300`(秒,生产默认);数据卷挂载宿主 `~/.search_reader_mcp` → 容器 `/app/extension/data`(sqlite 缓存库 `cache.db`、`read-cache/`、`.log/` 日志均落宿主,便于 4.3 直接查库验证)。
+
+> 若要验证缓存**失效重抓**(需要秒级过期),可用临时短 TTL 容器(不挂卷,避免污染持久缓存):`docker run -d --name srm -p 18081:18081 -e BOCHA_API_KEY -e READ_CACHE_TTL=5 -e READ_TIMEOUT=90 -e SERVER_URL=http://localhost:18081 search-reader-mcp`,验证完 `docker rm -f srm`。4.3 默认走 compose 的 TTL=300 验证命中/续期。
 
 ### 3. 等待就绪
 
-Chrome 初始化需数秒(本机约 9s)。轮询 health:
+Chrome 启动**不稳定且较慢**:容器常遇 jina 内部 puppeteer 10s 超时(`Timed out after 10000 ms while waiting for the WS endpoint URL`),进程退出后由 `restart: unless-stopped` 拉起,通常 1-2 次后能起来。**给足 30-60s**,轮询 health:
 
 ```bash
-for i in $(seq 1 20); do sleep 3; code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18081/health 2>/dev/null); [ "$code" = "200" ] && break; done; echo "health=$code"
+for i in $(seq 1 30); do sleep 3; code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18081/health 2>/dev/null); [ "$code" = "200" ] && break; done; echo "health=$code"
 ```
+
+若多轮仍未 200,`docker logs search-reader-mcp | tail` 看 Chrome 超时/重启循环,稍等重试即可(不要反复 `up -d`,会加重重启竞争)。
 
 ### 4. HTTP 冒烟
 
@@ -50,14 +50,16 @@ for i in $(seq 1 20); do sleep 3; code=$(curl -s -o /dev/null -w '%{http_code}' 
 
 ```bash
 # 路径即 url,无需 query 参数;附加 query string 验证保留(改写的 req.url 不丢参数)
+# 注意用普通参数(如 ?x=1)而非 utm 类:jina 会清理 utm_source 等追踪参数(见下)
 curl -s -o /tmp/read1.md -w 'code=%{http_code} time=%{time_total}s\n' \
-  'http://localhost:18081/read/https://example.com/?utm_source=smoke&x=1'
+  'http://localhost:18081/read/https://example.com/?x=1'
 ```
 
 断言:
 
 - `code=200`,`/tmp/read1.md` 为 Markdown 正文(含 example.com 标题文本)
 - query 保留:带 query string 的 URL 正常抓取返回。容器内不直接观测 jina 收到的 `req.url`;**query 保留的强断言在宿主单测**(`test/read.http.test.js` 断言改写后 `req.url === '/http://example.com?a=1&b=2'`);容器冒烟确认真实 jina 下带 query 的 URL 不报错即可
+- **UTM 清理(实测)**:jina 会清掉 `utm_source` 等追踪参数——URL Source 显示 `?x=1` 而非 `?utm_source=smoke&x=1`。故容器侧断言 query 保留请用非 utm 普通参数(如 `?x=1`);带 utm 的 URL 仍正常抓取,只是 query 被 jina 清洗,属镜像原生行为,非我们丢参(我们改写 `req.url` 保留原始 query,见宿主单测)
 
 `/r/` 与 `/read/` 完全同义,任选其一验证。
 
@@ -92,49 +94,30 @@ curl -s -o /tmp/upload-pdf.md -w 'code=%{http_code}\n' \
 
 断言:`code=200`,输出含 PDF 内文本(如标题/正文关键词)。若暂无可解析 PDF,HTML 上传已覆盖上传管线,PDF 解析为 jina 原生能力可跳过并注明。
 
-> 上传解析**不缓存**(一次性语义):重复上传同一文件,每次均为 200(可复核 `docker logs srm`,每次都是上传请求而非缓存命中)。
+> 上传解析**不缓存**(一次性语义):重复上传同一文件,每次均为 200(可复核 `docker logs search-reader-mcp`,每次都是上传请求而非缓存命中)。
 
-#### 4.3 read 缓存:命中 / 滑动续期 / 失效重抓
+#### 4.3 read 缓存:命中 / 滑动续期 / query 作键(compose TTL=300)
 
-利用 `READ_CACHE_TTL=5`。取同一 URL(缓存键 = uri 含 query + engine 归一化;此处不带 query 保持干净):
+缓存键 = `uri(含 query) + engine` 归一化;命中即滑动续期(`expire_at = now + TTL`),过期惰性删除重抓。compose 默认 `READ_CACHE_TTL=300`,**命中与续期**用宿主侧 sqlite 直接查 `expire_at` 验证(库在 `~/.search_reader_mcp/cache.db`,表 `read_cache`;查库需 node ≥ 22.5,宿主 `node -p process.version` 确认):
 
 ```bash
-# 第一次:miss,走 jina 抓取(记录基准耗时)
-curl -s -o /tmp/c1.md -w 'c1 code=%{http_code} time=%{time_total}s\n' \
-  'http://localhost:18081/read/https://example.com/'
-# 立即第二次:hit,缓存瞬时返回
-curl -s -o /tmp/c2.md -w 'c2 code=%{http_code} time=%{time_total}s\n' \
-  'http://localhost:18081/read/https://example.com/'
-diff /tmp/c1.md /tmp/c2.md && echo 'body 一致'
+# 记录某个 URL 当前缓存条目的 expire_at(epoch ms)
+node -e "const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(process.env.HOME+'/.search_reader_mcp/cache.db');console.table(d.prepare('SELECT uri,engine,expire_at FROM read_cache').all())"
+
+# 命中:再次 GET,应瞬时返回(首次抓取为 3-15s 量级)
+curl -s -o /tmp/c2.md -w 'hit code=%{http_code} time=%{time_total}s\n' \
+  'http://localhost:18081/read/https://example.com/?x=1'
 ```
 
 断言:
 
-- `c2.time_total` 显著小于 `c1`(命中瞬时返回,不占 timeout 预算);两次 body 一致(`diff` 无输出)
-- 佐证:`docker logs srm | tail`,`GET /r/https://example.com/` 第二次耗时 ms 级(第一次为抓取量级)
+- 命中耗时 **ms 级**(首次抓取为秒级);再查库,该行 `expire_at` 已被**滑动续期**为更大的 `now+300s`
+- **query 作缓存键**:同一 URL 加不同 query(`?x=1`)是独立缓存条目——首次 miss(秒级)、二次 hit(ms 级);`read_cache` 表可见 `uri` 带 `?x=1` 的独立行
+- **UTM 与键隔离**:`?utm_source=` 虽被 jina 清洗,但仍是独立缓存键(我们按原始 query 建键),与 4.1 的 UTM 清理互不影响
 
-**滑动续期**(TTL=5 窗口内连续访问,每次命中并续期,全程不重抓):
+**失效重抓**:TTL=300 下等过期不现实,**由宿主单测覆盖**(`test/cache.test.js`「缓存过期后重新加载」)。若确需容器实测,用第 2 节所述短 TTL 临时容器,或直接删缓存文件 `rm ~/.search_reader_mcp/read-cache/<sha256>.md`(等价触发惰性删除)后重抓。
 
-```bash
-# t≈0 抓取 → t≈2s 命中(续期到 7s)→ t≈4s 命中(续期到 9s)→ t≈6s 命中(未续期则 5s 已过期)
-for i in 1 2 3 4; do curl -s -o /dev/null -w "h$i time=%{time_total}s\n" \
-  'http://localhost:18081/read/https://example.com/'; sleep 2; done
-```
-
-断言:四次均命中(耗时都小);`docker logs srm` 中该 URL 仅第一次出现抓取耗时,其余为 ms 级 → 每次访问都在滑动续期,未因 TTL 过期重抓。
-
-**失效重抓**(等 TTL 过期后再请求,重新抓取):
-
-```bash
-sleep 6   # > READ_CACHE_TTL=5,缓存已过期
-curl -s -o /tmp/c3.md -w 'c3 code=%{http_code} time=%{time_total}s\n' \
-  'http://localhost:18081/read/https://example.com/'
-diff /tmp/c1.md /tmp/c3.md && echo 'body 一致'
-```
-
-断言:`c3.time_total` 恢复抓取量级(≈c1),body 仍一致 → 惰性删除 + 失效重抓。
-
-> 缓存行为的硬断言(同键命中不重复调用、engine 键隔离、非 200 不写缓存、超时不写缓存)在宿主单测 `test/cache.test.js`/`test/read.http.test.js`;容器冒烟验证真实 jina 下的时间行为与 body 一致性。
+> 缓存行为的硬断言(同键命中不重复调用、engine 键隔离、非 200 不写缓存、超时不写缓存)在宿主单测 `test/cache.test.js`/`test/read.http.test.js`;容器冒烟验证真实 jina 下的时间行为、`expire_at` 续期与 query 键隔离。
 
 #### 4.4 search 端点(保持)
 
@@ -150,8 +133,8 @@ diff /tmp/c1.md /tmp/c3.md && echo 'body 一致'
 | 端点 | 断言 |
 | --- | --- |
 | `GET /` 与 `GET /health` | 200;`{"service":"search-reader-mcp","status":"ok"}` |
-| `POST /mcp`(initialize, JSON-RPC) | `serverInfo: search-reader-mcp`;**响应带 `Mcp-Session-Id`** |
-| `GET /sse` | `event: endpoint` + `data: /messages?sessionId=...` |
+| `POST /mcp`(initialize, JSON-RPC) | `serverInfo: search-reader-mcp`;**无状态模式:不返回 `Mcp-Session-Id`**,每次请求独立、天然支持多客户端 |
+| `GET /sse` | legacy SSE(连接级会话):`event: endpoint` + `data: /messages?sessionId=...`;每连接独立 transport,按连接隔离 |
 
 ### 5. MCP 工具调用(`scripts/mcp-smoke.mjs`)
 
@@ -160,7 +143,7 @@ node scripts/mcp-smoke.mjs            # 默认 http://localhost:18081
 node scripts/mcp-smoke.mjs http://host:port
 ```
 
-脚本初始化 streamable HTTP 会话后逐项断言,打印 `[PASS]`/`[FAIL]`;**任一项失败以 exit 1 退出**,可直接用于 CI 门禁。检查点:
+脚本对 `/mcp`(streamable HTTP,**无状态模式**:不返回/不携带 `Mcp-Session-Id`,每次请求独立,天然支持多客户端)做初始化握手与逐项工具断言,打印 `[PASS]`/`[FAIL]`;**任一项失败以 exit 1 退出**,可直接用于 CI 门禁。检查点:
 
 - `tools/list` 返回 `search`/`read`
 - `read` 工具(参数为 v7 的 `uri`):
@@ -177,28 +160,45 @@ node scripts/mcp-smoke.mjs http://host:port
 
 ### 6. docker exec 列 jina koaApp 实际路由清单
 
-确认 `/read/**` 全量覆盖 + `POST /read` 上传解析真实存在:
+确认 `/read/**` 全量覆盖 + `POST /read` 上传解析真实存在。**jina 不用 koa-router**(koaApp 无 `router`/`_router` 字段、无 `router.stack`);路由是 `registerRoutes()` 挂的**中间件链**,`middleware` 在 `serviceReady()` 后才填充。注意 `require(crawl.js)` 会触发完整服务初始化(副作用:临时多启一套 worker/Chrome,探测完 `process.exit(0)` 退出):
 
 ```bash
-docker exec srm node -e "
-const app = require('/app/build/stand-alone/crawl.js').default.koaApp;
-const router = app.router || app._router;
-if (!router) { console.log('未找到 router,koaApp 字段:', Object.keys(app)); process.exit(1); }
-router.stack.forEach((l) => console.log(((l.methods && l.methods.join(',')) || '*'), l.path));
-"
+docker exec search-reader-mcp node -e '
+const m = require("/app/build/stand-alone/crawl.js").default;
+(async () => { await m.serviceReady(); const app = m.koaApp;
+  console.log("middleware count:", app.middleware.length);
+  app.middleware.forEach((mw, i) => console.log(i, mw.name || "(anon)", "| router:", !!mw.router));
+  process.exit(0);
+})();'
 ```
+
+实测(镜像 ghcr.io/jina-ai/reader:latest)输出 `middleware count: 7`,清单:
+
+| # | 中间件 | 角色 |
+| --- | --- | --- |
+| 0 | `asyncHookMiddleware` | 请求 traceId 注入 |
+| 1 | `healthCheck` | health 探针 |
+| 2 | `loggingMiddleware` | 请求日志 |
+| 3 | (anon) | CORS/公共中间件 |
+| 4 | `compressMiddleware` | 响应压缩 |
+| 5 | (anon) | `makeAssetsServingController()`(静态资产) |
+| 6 | (anon) | `registry.makeShimController()`(**核心路由分发**,把 path 当目标 URL) |
+
+路由来源(grep 编译产物可复核):`docker exec search-reader-mcp grep -n "koaApp.use" /app/build/stand-alone/crawl.js` → `compressMiddleware`、`makeAssetsServingController()`、`registry.makeShimController()`、`asyncHookMiddleware`。
 
 断言:
 
-- 输出为 jina 原生路由清单(实际以镜像版本为准,通常含 `GET /`、`/pdf`、`/screenshot` 等)
+- 输出含 7 个中间件(以镜像版本为准);核心分发是 #6 shimController,它把 `ctx.path`(形如 `/http://example.com`)当目标 URL 交给抓取栈 → 印证 `/read/<url>` 透传语义
 - 结合 4.1/4.2 实测:`/read/**`(任意 method 透传)下 `GET /read/<url>` 与 `POST /read` 上传解析均 200,证明全量挂载面已覆盖
 
-> 若镜像升级后 `koaApp.router` 字段名变化,改用 `Object.keys(app)` 定位后重试;路由清单仅用于确认挂载面,挂载映射的强断言在宿主单测 `test/read.http.test.js`。
+> 挂载映射的强断言在宿主单测 `test/read.http.test.js`;容器侧仅确认中间件链与真实抓取 200。镜像升级后若清单变化,以 `middleware count` 与 grep `koaApp.use` 复核为准。
 
 ### 7. 清理
 
 ```bash
-docker rm -f srm
+docker compose down          # 停止并移除 compose 容器
+# 持久数据保留在宿主 ~/.search_reader_mcp/(cache.db、read-cache/、.log/),不随容器删除
+# 若用了第 2 节短 TTL 临时容器:`docker rm -f srm`
 ```
 
 ## 测试文件
@@ -219,8 +219,9 @@ docker rm -f srm
 
 - **容器秒退 / `Cannot find module '/app/sleep'`**:镜像 `ENTRYPOINT` 是 `node`;跑临时容器需 `--entrypoint /bin/sleep`(且注意 Git Bash 的路径转换,加 `MSYS_NO_PATHCONV=1`)。
 - **`/sse` 无响应**:确认 `SSEServerTransport` 显式 `await tx.start()`(McpServer.connect 不会自动调)。
-- **MCP 无 `Mcp-Session-Id`**:确认 transport 使用 `sessionIdGenerator`(非 `undefined`,否则是无状态模式)。
+- **MCP 无 `Mcp-Session-Id`(预期行为)**:`/mcp` 走**无状态模式**,初始化不返回 `Mcp-Session-Id`,每次请求独立、支持多客户端;脚本 `mcp-smoke.mjs` 已适配,勿再断言 session id。若曾出现第二个客户端报 `Server already initialized`,那是旧版有状态单例 transport 的缺陷,已改为无状态修复。
 - **`MCP read 工具报错 / 参数名不符`**:v7 起 read 工具参数为 `uri`(旧 `url` 已废弃);请用最新 `scripts/mcp-smoke.mjs`,勿用旧版 `url` 参数。
-- **缓存时间抖动**:本机网络慢时第一次抓取可能 >5s,导致 TTL 提前过期、4.3 的「命中」断言失败;此时把 `READ_CACHE_TTL` 调大(如 15)重跑,并相应调整 `sleep`。
+- **缓存时间抖动**:compose 默认 TTL=300,正常抓取(秒级)远小于 TTL,不会抖动;仅短 TTL 临时容器(如 5s)在网络慢时可能提前过期,此时调大 `READ_CACHE_TTL` 重跑。
+- **Chrome 启动超时 / 容器重启循环**:见第 3 节——puppeteer 10s 超时导致进程退出后由 `restart: unless-stopped` 拉起,属镜像原生现象,等 30-60s 后 health 200 即正常;不要反复 `docker compose up -d` 加重重启竞争。
 - **上传返回错误页而非 Markdown**:确认上传文件真实可解析(HTML 有完整 `<html>` 结构、PDF 非损坏);jina 对无法解析的文件返回错误页,属预期。
-- **容器内抓取外部站点超时/失败**:确认容器出网正常(`docker exec srm node -e "fetch('https://example.com').then(r=>console.log(r.status))"`);代理/防火墙环境下 example.com 可能被拦,可换可达的 http(s) 页面。
+- **容器内抓取外部站点超时/失败**:确认容器出网正常(`docker exec search-reader-mcp node -e "fetch('https://example.com').then(r=>console.log(r.status))"`);代理/防火墙环境下 example.com 可能被拦,可换可达的 http(s) 页面。
