@@ -21,8 +21,10 @@ services:
       # 例:MCP_SEARCH_DESC、MCP_READ_DESC、MCP_READ_URI、MCP_READ_LENGTH。
       # 未设置的描述沿用内建,不在此逐一列举(任意 MCP_* 描述变量均生效)。
     volumes:
-      # 持久化目录外挂到宿主 ~/.search_reader_mcp/;sqlite 缓存库与配置文件都在这
-      - "${HOME}/.search_reader_mcp:/app/extension/data"
+      # 持久化目录外挂到宿主 ~/.search_reader_mcp/;sqlite 缓存库与配置文件都在这。
+      # 用 `~` 而非 ${HOME}:compose 会把 `~` 展开为当前用户 home,Windows/Linux 通用
+      # (${HOME} 在 cmd/PowerShell 下未设置,会解析成空串导致挂载到根路径、容器内无写权限)。
+      - "~/.search_reader_mcp:/app/extension/data"
     restart: unless-stopped
 
   # 开发容器:基于 jina 镜像直接开发,挂载工作区,tsc --watch + node --watch 热重载
