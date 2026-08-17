@@ -1,7 +1,7 @@
 # 02 · read 缓存:read_cache 表 + 读写/续期/清理 + in-flight 去重
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 
 ## 目标
@@ -36,3 +36,16 @@ Blocked by: 01
 4. **合并回基线**:`git merge --no-ff` 合并回 `feat/v7-read-cache-mcp`;同文件冲突(多 ticket 改同一文件)由后合并者解决;完成后更新本 ticket `Status: resolved`。
 5. **全部完成后**:协调会话将基线统一合并进 `main`(期间不逐个合 main)。
 6. **push 与交接**:任务中断或用户走开时,显式 push 到远端同名分支(`origin/feat/v7-read-cache-mcp`、`origin/feat/v7/02-cache`);跨会话/中断时按需留交接文档。
+
+## Answer
+
+在 `src/cache/sqlite.ts` 为 `CacheDb` 实现 read 一级缓存(仅缓存解析后 Markdown,键 = uri+engine):
+
+- `read_cache` 表:`uri`/`engine`/`cache_path`/`expire_at`(epoch ms),`UNIQUE(uri, engine)`;schema_version 升 2;缓存文件 `sha256(键)` 落库同目录 `read-cache/`。
+- `getRead`:命中返回全文并滑动续期(`expire_at = now + TTL`);过期/文件缺失惰性删行删文件返回 null(触发重抓)。
+- `putRead`:写文件 + UPSERT 索引,幂等覆盖;只由成功路径调用(loader 抛错不写缓存);缓存写失败(磁盘/库异常)吞掉,不阻断已成功的抓取。
+- `sweepReadExpired`:兜底清理仅按 `expire_at <= now` 删行 + 删文件,不误删并发新写行;`startSweeper(intervalMs)` 每小时定时(unref,close 时停止)。
+- `getOrFetchRead`:命中瞬时返回;miss 经 loader 拉取并写缓存;同键并发共享进行中 Promise(in-flight 去重,完成后移除),不同 engine 互不等待;loader 抛错不写缓存、异常上抛。
+- `test/cache.test.js` 10 用例:写入/命中/过期重抓/滑动续期/兜底清理只删过期/in-flight 同键只抓一次/engine 独立/失败不写缓存/重复 put 覆盖/命中不调 loader;全量 35/35 通过。
+
+handleRead 的缓存接入(engine 取 `X-Engine` 头归一化、miss 走 jina 抓取、`POST /read` 不缓存、timeout)由 03 承接。已 merge --no-ff 回基线 `feat/v7-read-cache-mcp`。
