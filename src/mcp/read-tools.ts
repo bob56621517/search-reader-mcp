@@ -93,7 +93,7 @@ const UPLOAD_TEMPLATE = String.raw`该资源的 scheme 无法由服务端直接�
 - {SERVER_URL}/read           服务端上传解析端点;{SERVER_URL} 即服务端对外地址
                              (当前 {SERVER_URL},默认 http://localhost:18081;云部署为公网地址)
 - -F 'file=@<本地文件路径>'    以 multipart/form-data 上传文件,字段名固定 file;
-                             支持 web(.html)、Word(.doc/.docx)、Excel(.xls/.xlsx)、PowerPoint(.ppt/.pptx)
+                             支持 web(.html)、Word(.doc/.docx)、Excel(.xls/.xlsx)、PowerPoint(.ppt/.pptx)、PDF 及其他文档类文件
 - -H 'x-engine: auto'         解析引擎,对应 read 工具的 engine 参数:auto(默认,智能选择)/
                              direct(轻量无 JS)/ browser(浏览器渲染)
 - -H 'x-retain-links: all'    保留页面中所有链接 URL(markdown 形式),默认全保留
