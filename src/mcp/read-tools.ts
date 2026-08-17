@@ -57,6 +57,16 @@ export function engineHeaderValue(engine: ReadEngine | undefined): string | unde
   return undefined;
 }
 
+/** engine 归一化为缓存键三值(HTTP 层 X-Engine header → read_cache.engine):
+ * 未传/未知 → auto;browser → browser;curl/direct → curl。
+ * 与 engineHeaderValue(MCP 参数 → header)成对,共用一个 engine 语义。 */
+export function normalizeEngine(header: string | undefined): string {
+  const v = (header || '').trim().toLowerCase();
+  if (v === 'browser') return 'browser';
+  if (v === 'curl' || v === 'direct') return 'curl';
+  return 'auto';
+}
+
 /** timeout 默认链:per-call timeout > config.readTimeout > 90 */
 export function resolveReadTimeout(timeout: number | undefined, readTimeout: number): number {
   if (timeout !== undefined) return timeout;
