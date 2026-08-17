@@ -33,7 +33,7 @@ export interface McpToolDeps {
 }
 
 export function createMcpServer(deps: McpToolDeps): McpServer {
-  const server = new McpServer({ name: 'search-reader-mcp', version: '0.1.0' });
+  const server = new McpServer({ name: 'search-reader-mcp', version: '0.2.0' });
   const desc = deps.config.mcpDesc;
   const searchDesc = desc.search;
 
