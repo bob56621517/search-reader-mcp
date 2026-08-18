@@ -8,7 +8,8 @@ on:
       - 'v*'
 
 jobs:
-  # 门禁:宿主测试(tsc + HTTP 契约 + 纯逻辑单测,不依赖容器)
+  # 门禁:双产出物宿主测试(server 与 client 各自 npm ci + npm test,均不依赖容器;
+  # client 主接缝测试经 stdio 连真实 client,server HTTP 与 docker 在注入点打桩)
   test:
     runs-on: ubuntu-latest
     steps:
@@ -17,10 +18,16 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: server/package-lock.json
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
       - working-directory: server
         run: npm ci
       - working-directory: server
+        run: npm test
+      - working-directory: client
+        run: npm ci
+      - working-directory: client
         run: npm test
 
   # 构建并推送镜像(依赖 test 通过)

@@ -224,6 +224,9 @@ async function handleRead(
   // 无尾路径(上传解析)已在上方 return,不缓存;键 = uri(含 query)+ engine。
   // engine/timeout 选项:POST 可带选项 body(统一走 POST),缺省回退 header(既有 GET 契约)。
   const engine = normalizeEngine(readOption(ctx, 'engine', 'x-engine'));
+  // 透传 engine 给 jina:POST 选项统一入 body(US16),HTTP 层需转成 jina 认识的 X-Engine header
+  // (归一化值即 header 值:browser / curl),auto 不传;jinaFetch 不改写此 header。
+  if (engine !== 'auto') ctx.req.headers['x-engine'] = engine;
   const ttlMs = config.readCacheTtl * 1000;
   try {
     const content = await cache.getOrFetchRead(fullUri, engine, ttlMs, async () => {

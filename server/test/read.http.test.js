@@ -113,6 +113,31 @@ test('POST /read/<url> body timeout 触发整体超时(504)', async () => {
     .expect(504);
 });
 
+test('POST /read/<url> body engine 透传 X-Engine 给 jina(端到端生效)', async () => {
+  const jina = mockJina();
+  const app = await makeApp(testConfig(), jina);
+  // body engine=browser → X-Engine: browser
+  await request(app.callback())
+    .post('/read/' + encodeURIComponent('http://eng-a.com'))
+    .send({ engine: 'browser' })
+    .set('Content-Type', 'application/json')
+    .expect(200);
+  assert.equal(jina.calls[0].headers['x-engine'], 'browser');
+  // direct → 归一化 curl
+  await request(app.callback())
+    .post('/read/' + encodeURIComponent('http://eng-b.com'))
+    .send({ engine: 'direct' })
+    .set('Content-Type', 'application/json')
+    .expect(200);
+  assert.equal(jina.calls[1].headers['x-engine'], 'curl');
+  // 缺省 auto 不透传
+  await request(app.callback())
+    .post('/read/' + encodeURIComponent('http://eng-c.com'))
+    .set('Content-Type', 'application/json')
+    .expect(200);
+  assert.equal(jina.calls[2].headers['x-engine'], undefined);
+});
+
 // ---- 缓存接入 ----
 
 test('同键(uri+engine)第二次 GET 命中缓存,jina 不重复抓取', async () => {
