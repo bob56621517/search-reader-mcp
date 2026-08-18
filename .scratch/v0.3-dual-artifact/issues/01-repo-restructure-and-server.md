@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] 仓库分为 `server/` 与 `client/` 两棵独立 Node 项目,互不跨树相对 import;`server/` 功能不变、全测试绿、镜像可构建;CI 与 Docker 构建 context 指向 `server/`;版本统一 0.3.0
 - [ ] `GET /catalog` 返回 search/read 的 `name/description/annotations`(四项显式,含 `destructiveHint:false`),desc 复用整合服务器的 `MCP_*` env 化描述(ADR-0009)

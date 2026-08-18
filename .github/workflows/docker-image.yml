@@ -1,6 +1,7 @@
 name: docker-image
 
-# 里程碑发布:push 形如 v0.2.0 的 tag 时,构建 Dockerfile 并推送镜像到 GHCR
+# 里程碑发布:push 形如 v0.2.0 的 tag 时,构建 server/Dockerfile 并推送镜像到 GHCR
+# (v0.3 双产出物:server/ 为容器项目;client/ 为本地 stdio MCP,不在此 workflow 构建)
 on:
   push:
     tags:
@@ -16,8 +17,11 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
-      - run: npm test
+          cache-dependency-path: server/package-lock.json
+      - working-directory: server
+        run: npm ci
+      - working-directory: server
+        run: npm test
 
   # 构建并推送镜像(依赖 test 通过)
   build-and-push:
@@ -55,7 +59,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./server
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

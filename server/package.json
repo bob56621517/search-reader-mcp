@@ -1,6 +1,6 @@
 {
   "name": "search-reader-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "扩展 jina-reader 镜像:自定义搜索(bocha)+ MCP 服务,单端口整合服务器覆盖默认服务",
   "main": "dist/index.js",

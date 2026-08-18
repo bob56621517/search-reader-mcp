@@ -4,15 +4,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('supertest');
-const os = require('node:os');
-const path = require('node:path');
-const { loadConfig } = require('../dist/config.js');
 const { createApp } = require('../dist/server.js');
+const { makeTmpDir, makeTestConfig } = require('./http-helper.js');
 
-const tmpDir = path.join(os.tmpdir(), `srm-test-${process.pid}`);
+const tmpDir = makeTmpDir('search');
 
 function testConfig(overrides = {}) {
-  return loadConfig({ BOCHA_API_KEY: 'test-key', SEARCH_READER_MCP_DATA: tmpDir, ...overrides });
+  return makeTestConfig(tmpDir, overrides);
 }
 
 /** mock 全局 fetch,记录请求体,返回固定 body */

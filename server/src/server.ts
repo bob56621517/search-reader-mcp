@@ -9,6 +9,7 @@ import { JinaReaderBridge } from './jina/reader';
 import { DailyLogger } from './log/daily';
 import { ReadUrlOptions, createMcpServer } from './mcp/server';
 import { engineHeaderValue, normalizeEngine } from './mcp/read-tools';
+import { TOOL_ANNOTATIONS } from './mcp/annotations';
 
 /**
  * 整合服务器(ADR-0001):单端口承载 read/、search/、mcp/、sse/。
@@ -144,6 +145,21 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
         await handleSearch(ctx, bocha, route.type, route.pathQuery);
         return;
       }
+      // ---- catalog:工具目录元数据(ADR-0009,desc/hints 单一来源;仅 GET) ----
+      if (exact === '/catalog') {
+        if (method !== 'GET') {
+          ctx.status = 405;
+          ctx.body = { error: 'Method Not Allowed' };
+          return;
+        }
+        ctx.body = {
+          tools: [
+            { name: 'search', description: config.mcpDesc.search.description, annotations: TOOL_ANNOTATIONS },
+            { name: 'read', description: config.mcpDesc.read.description, annotations: TOOL_ANNOTATIONS },
+          ],
+        };
+        return;
+      }
       // ---- health ----
       if (exact === '/' || exact === '/health') {
         ctx.body = { service: 'search-reader-mcp', status: 'ok' };
@@ -165,9 +181,9 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
 
 // ---- read 路由:v7#03 全量挂载(任意 method)+ query 保留 + 缓存接入 + timeout ----
 // 挂载映射:`/read` → jina `/`、`/read/<rest>` → `/<rest>`;`/r` 完全同义。
-//   - GET 带 URL:接入 read_cache(键 = uri 含 query + engine 归一化);命中直接返回全文(不占 timeout 预算),
-//     miss 走 jina 抓取,成功(200)写缓存;非 200 / 超时不写缓存。
-//   - 其余路径/method(无尾路径、POST 上传解析、POST /read/<rest> 等):透传 jina,不缓存。
+//   - 带 URL 路径(任意 method;GET|POST 等价,jina 契约):接入 read_cache(键 = uri 含 query + engine 归一化);
+//     命中直接返回全文(不占 timeout 预算),miss 走 jina 抓取,成功(200)写缓存;非 200 / 超时不写缓存。
+//   - 无尾路径(`/read` 或 `/r`):透传 jina `/`(GET 原生根、POST multipart 上传解析),不缓存。
 //   - 统一走 jinaFetch:所有路径都经捕获响应 + 整体硬超时(X-Read-Timeout,缺省 config.readTimeout);
 //     改写 req.url 保留原始 query string(修复丢 query bug)。
 // 注意:真实 jina 的响应形态在容器冒烟(docs/smoke-test.md)验证,CaptureResponse 为最小替身。
@@ -204,14 +220,10 @@ async function handleRead(
   // 完整目标 URL(含 query),缓存键的 uri 部分
   const fullUri = target + (qs ? '?' + qs : '');
 
-  // 非 GET(上传/其它 method)不缓存,透传 jina
-  if (ctx.method !== 'GET') {
-    await respondFromJina(ctx, jina, '/' + fullUri, budgetSec);
-    return;
-  }
-
-  // GET:接入 read_cache
-  const engine = normalizeEngine(ctx.get('x-engine'));
+  // 带 URL 路径(任意 method;GET|POST 等价,ADR-0004 + jina 契约):接入 read_cache。
+  // 无尾路径(上传解析)已在上方 return,不缓存;键 = uri(含 query)+ engine。
+  // engine/timeout 选项:POST 可带选项 body(统一走 POST),缺省回退 header(既有 GET 契约)。
+  const engine = normalizeEngine(readOption(ctx, 'engine', 'x-engine'));
   const ttlMs = config.readCacheTtl * 1000;
   try {
     const content = await cache.getOrFetchRead(fullUri, engine, ttlMs, async () => {
@@ -265,10 +277,20 @@ function respondCaptured(ctx: Koa.Context, cap: CaptureResponse): void {
   if (cap.body) ctx.body = cap.body;
 }
 
-/** 整体硬超时(秒):优先 X-Read-Timeout header,缺省 config.readTimeout;非法值回退默认 */
+/** 整体硬超时(秒):POST body timeout(选项入 body)优先,回退 X-Read-Timeout header,缺省 config.readTimeout;非法值回退默认 */
 function readBudgetSec(ctx: Koa.Context, fallback: number): number {
+  const bt = Number((ctx.request as any).body?.timeout);
+  if (Number.isFinite(bt) && bt > 0) return bt;
   const v = Number(ctx.get('x-read-timeout'));
   return Number.isFinite(v) && v > 0 ? v : fallback;
+}
+
+/** 选项取值:POST body(POST 选项入 body,统一走 POST)优先,缺省回退 header(既有 GET 契约) */
+function readOption(ctx: Koa.Context, bodyKey: string, headerName: string): string {
+  const body = (ctx.request as any).body as Record<string, unknown> | undefined;
+  const bv = body?.[bodyKey];
+  if (bv != null && String(bv).trim() !== '') return String(bv);
+  return ctx.get(headerName);
 }
 
 /**

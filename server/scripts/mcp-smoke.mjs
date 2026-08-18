@@ -51,6 +51,31 @@ check(
   tools.text.slice(0, 200),
 );
 
+// 工具 hint 四项全声明(ADR-0009/OpenAI 目录要求):search/read 均含 destructiveHint:false
+let hintsOk = false;
+try {
+  const parsed = JSON.parse(tools.text);
+  const arr = parsed?.result?.tools ?? [];
+  hintsOk =
+    arr.length === 2 &&
+    arr.every((t) => {
+      const a = t.annotations || {};
+      return (
+        a.readOnlyHint === true &&
+        a.idempotentHint === true &&
+        a.openWorldHint === true &&
+        a.destructiveHint === false
+      );
+    });
+} catch {
+  hintsOk = false;
+}
+check(
+  'tools/list 的 search/read 四项 hint 全声明(含 destructiveHint:false)',
+  hintsOk,
+  tools.text.slice(0, 300),
+);
+
 // ---- read 工具(参数为 v7 的 uri/skip/length/engine/timeout) ----
 
 const readFull = await callTool('read', { uri: 'http://example.com' });
