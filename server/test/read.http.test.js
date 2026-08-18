@@ -84,50 +84,41 @@ test('POST /read/<url> 与 GET 等价接入缓存(jina 契约 GET|POST)', async 
   assert.equal(jina.calls.length, 1);
 });
 
-test('POST /read/<url> 选项入 body(engine)生效,缓存键含 body engine', async () => {
+test('POST /read/<url> 选项经 header(engine)生效,缓存键含 header engine', async () => {
   const jina = mockJina();
   const app = await makeApp(testConfig({ READ_CACHE_TTL: '300' }), jina);
   const url = '/read/' + encodeURIComponent('http://bodyopts.com');
-  // body engine=browser:两次同 body 命中同一份缓存(jina 仅抓取一次)
-  await request(app.callback())
-    .post(url)
-    .send({ engine: 'browser' })
-    .set('Content-Type', 'application/json')
-    .expect(200);
+  // header engine=browser:两次同 engine 命中同一份缓存(jina 仅抓取一次)。
+  // 注:选项经 header(X-Engine)传递——POST /read/<url> 由 server 跳过 bodyParser
+  // (真实 jina 下 JSON body 会致 jina 内层 499 "Request already closed")。
+  await request(app.callback()).post(url).set('X-Engine', 'browser').expect(200);
   assert.equal(jina.calls.length, 1);
-  await request(app.callback())
-    .post(url)
-    .send({ engine: 'browser' })
-    .set('Content-Type', 'application/json')
-    .expect(200);
+  await request(app.callback()).post(url).set('X-Engine', 'browser').expect(200);
   assert.equal(jina.calls.length, 1);
 });
 
-test('POST /read/<url> body timeout 触发整体超时(504)', async () => {
+test('POST /read/<url> header timeout 触发整体超时(504)', async () => {
   const jina = mockJina({ handler: () => {} }); // 挂起,永不 end
   const app = await makeApp(testConfig(), jina);
   await request(app.callback())
     .post('/read/' + encodeURIComponent('http://slow.com'))
-    .send({ timeout: 0.1 })
-    .set('Content-Type', 'application/json')
+    .set('X-Read-Timeout', '0.1')
     .expect(504);
 });
 
-test('POST /read/<url> body engine 透传 X-Engine 给 jina(端到端生效)', async () => {
+test('POST /read/<url> header engine 透传 X-Engine 给 jina(端到端生效)', async () => {
   const jina = mockJina();
   const app = await makeApp(testConfig(), jina);
-  // body engine=browser → X-Engine: browser
+  // header engine=browser → X-Engine: browser
   await request(app.callback())
     .post('/read/' + encodeURIComponent('http://eng-a.com'))
-    .send({ engine: 'browser' })
-    .set('Content-Type', 'application/json')
+    .set('X-Engine', 'browser')
     .expect(200);
   assert.equal(jina.calls[0].headers['x-engine'], 'browser');
   // direct → 归一化 curl
   await request(app.callback())
     .post('/read/' + encodeURIComponent('http://eng-b.com'))
-    .send({ engine: 'direct' })
-    .set('Content-Type', 'application/json')
+    .set('X-Engine', 'direct')
     .expect(200);
   assert.equal(jina.calls[1].headers['x-engine'], 'curl');
   // 缺省 auto 不透传

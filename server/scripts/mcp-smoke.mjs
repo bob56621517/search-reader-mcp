@@ -52,9 +52,11 @@ check(
 );
 
 // 工具 hint 四项全声明(ADR-0009/OpenAI 目录要求):search/read 均含 destructiveHint:false
+// 响应为 SSE 帧(event: message\ndata: {...});需取 data: 行 JSON.parse,不能直接 parse 整帧
 let hintsOk = false;
 try {
-  const parsed = JSON.parse(tools.text);
+  const dataLine = tools.text.split('\n').find((l) => l.startsWith('data: '));
+  const parsed = dataLine ? JSON.parse(dataLine.slice('data: '.length)) : null;
   const arr = parsed?.result?.tools ?? [];
   hintsOk =
     arr.length === 2 &&

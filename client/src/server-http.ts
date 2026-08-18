@@ -9,7 +9,7 @@ import type { ClientConfig } from './config';
  * 路由契约对齐 server/src/server.ts:
  *   health      GET  /health                                  → 200 即容器可用
  *   catalog     GET  /catalog                                 → {tools:[{name,description,annotations}]}
- *   readUrl     POST /read/<url>  body {engine?, timeout?}    → Markdown 全文
+ *   readUrl     POST /read/<url>  header X-Engine/X-Read-Timeout → Markdown 全文
  *   uploadFile  POST /read        multipart file=<buf>        → Markdown 全文(不缓存)
  *   search      POST /search/<type> body {query,...}          → 结构化 JSON
  */
@@ -113,13 +113,16 @@ export class RealServerHttp implements ServerHttp {
   }
 
   async readUrl(url: string, opts: ReadUrlOptions = {}): Promise<string> {
-    const body: Record<string, unknown> = {};
-    if (opts.engine !== undefined) body.engine = opts.engine;
-    if (opts.timeout !== undefined) body.timeout = opts.timeout;
+    // 选项经 header(X-Engine / X-Read-Timeout)传递,与 server 内 readUrl(self-call)一致;
+    // 不发 JSON body:POST /read/<url> 由 server 跳过 bodyParser,body 会致 jina 内层
+    // 499 "Request already closed"(真实 jina 实测)。
+    const headers: Record<string, string> = {};
+    const eng = engineHeaderValue(opts.engine);
+    if (eng) headers['X-Engine'] = eng;
+    if (opts.timeout !== undefined) headers['X-Read-Timeout'] = String(opts.timeout);
     const res = await this.fetchImpl(`${this.config.serverUrl}/read/${encodeURIComponent(url)}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      headers,
       signal: AbortSignal.timeout(this.readTimeoutMs(opts)),
     });
     if (!res.ok) {

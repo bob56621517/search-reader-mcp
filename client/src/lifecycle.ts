@@ -40,7 +40,8 @@ export function createLifecycle(
   const isNameInUse = (stderr: string): boolean =>
     /(name is in use|already in use|container name.*exists|the container name)/i.test(stderr);
 
-  /** docker run 命令(ADR-0011):常驻 --restart unless-stopped,卷透传 BOCHA_API_KEY */
+  /** docker run 命令(ADR-0011):常驻 --restart unless-stopped,卷透传 BOCHA_API_KEY。
+   *  端口绑定 127.0.0.1(client 为本地基础设施,默认仅本机访问,安全最小面);远程直连走 compose。 */
   const runContainer = (): Promise<DockerResult> =>
     docker.run(
       [
@@ -51,7 +52,7 @@ export function createLifecycle(
         '--restart',
         'unless-stopped',
         '-p',
-        `${config.hostPort}:18081`,
+        `127.0.0.1:${config.hostPort}:18081`,
         '-e',
         'BOCHA_API_KEY',
         '-v',

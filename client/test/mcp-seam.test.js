@@ -93,13 +93,14 @@ function startFakeServer(state) {
       });
       return;
     }
-    // read http(s):POST /read/<url> 选项入 body
+    // read http(s):POST /read/<url> 选项经 header(X-Engine / X-Read-Timeout)传递,不发 body
     if (req.method === 'POST' && p.startsWith('/read/')) {
       if (!state.alive) { res.writeHead(503); res.end(); return; } // 容器不可达模拟
       collect((buf) => {
         state.readCalls.push({
           rest: p.slice('/read/'.length),
           body: JSON.parse(buf.toString('utf8') || '{}'),
+          headers: req.headers,
         });
         res.writeHead(200, { 'content-type': 'text/markdown' });
         res.end('FULL-MARKDOWN-CONTENT');
@@ -246,15 +247,25 @@ test('A 容器已运行:catalog desc/hints + search/read 代理 + 本地文件�
       assert.equal(state.searchCalls[0].body.freshness, 'noLimit');
       assert.match(sres.content[0].text, /https:\/\/example\.com/);
 
-      // read http(s) → POST /read/<encoded url>,选项入 body;skip/length 本地切片
+      // read http(s) → POST /read/<encoded url>,选项经 header 传递(不发 body,真实 jina 下
+      // JSON body 会致 jina 内层 499);skip/length 本地切片
       const rres = await client.callTool({
         name: 'read',
         arguments: { uri: 'https://example.com/a?b=1' },
       });
       assert.equal(state.readCalls.length, 1);
       assert.equal(state.readCalls[0].rest, encodeURIComponent('https://example.com/a?b=1'));
-      assert.deepEqual(state.readCalls[0].body, {}); // 未显式传 engine/timeout 时不入 body
+      assert.deepEqual(state.readCalls[0].body, {}); // 不发 body
+      assert.equal(state.readCalls[0].headers['x-engine'], undefined); // 缺省 auto 不传 X-Engine
       assert.equal(rres.content[0].text, 'FULL-MARKDOWN-CONTENT');
+
+      // read(engine=direct, timeout=30) → header X-Engine: curl + X-Read-Timeout: 30
+      await client.callTool({
+        name: 'read',
+        arguments: { uri: 'https://example.com/b', engine: 'direct', timeout: 30 },
+      });
+      assert.equal(state.readCalls[1].headers['x-engine'], 'curl');
+      assert.equal(state.readCalls[1].headers['x-read-timeout'], '30');
 
       // read 本地文件(file:/// 绝对 URI)→ 读取后 multipart POST /read(字段 file)
       const fixture = path.join(os.tmpdir(), `srm-fixture-${process.pid}.txt`);
@@ -271,7 +282,7 @@ test('A 容器已运行:catalog desc/hints + search/read 代理 + 本地文件�
       const rrel = await client.callTool({ name: 'read', arguments: { uri: 'notes.md' } });
       assert.match(rrel.content[0].text, /read 工具无法解析/);
       assert.match(rrel.content[0].text, /相对路径/);
-      assert.equal(state.readCalls.length, 1);
+      assert.equal(state.readCalls.length, 2); // 两次 http(s) read(含 engine=direct 那次)
       assert.equal(state.uploads.length, 1);
 
       // read 其他 scheme(ftp)→ 指令文本(不解析)

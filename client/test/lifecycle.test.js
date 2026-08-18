@@ -113,12 +113,12 @@ test('条件齐备 → 后台 docker run(常驻参数),窗口期 starting;health
   assert.deepEqual(res, { ok: true });
   assert.equal(lc.status(), 'starting');
 
-  // docker run 命令契约(ADR-0011):常驻、端口映射、透传 BOCHA_API_KEY、数据卷、镜像 tag
+  // docker run 命令契约(ADR-0011):常驻、端口绑定 127.0.0.1(仅本机)、透传 BOCHA_API_KEY、数据卷、镜像 tag
   const run = calls.find((c) => c.args[0] === 'run');
   assert.ok(run, '应执行 docker run');
   assert.deepEqual(run.args, [
     'run', '-d', '--name', config.containerName, '--restart', 'unless-stopped',
-    '-p', `${config.hostPort}:18081`, '-e', 'BOCHA_API_KEY',
+    '-p', `127.0.0.1:${config.hostPort}:18081`, '-e', 'BOCHA_API_KEY',
     '-v', `${config.dataVolume}:/app/extension/data`, config.image,
   ]);
   assert.equal(run.opts.killOnTimeout, false, '拉镜像超时不 kill,转为后台观察');

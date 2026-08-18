@@ -82,16 +82,25 @@ export async function createApp(deps: AppDeps): Promise<Koa> {
 
   const app = new Koa();
   // bodyParser 按 Content-Type 分流:@koa/bodyparser v6 默认只解析 json/form,
-  // 本就吞不掉 multipart;此处显式放行 /read/** 的 multipart 上传流(bodyParser 不
-  // 解析、不消耗 stream),原样交给 jina 原生上传解析;其余 JSON 留给 search。
+  // 本就吞不掉 multipart。此处显式放行两类 read 请求(bodyParser 不解析、不消耗 stream):
+  //   1. read 的 multipart 上传流(POST /read,原样交 jina 原生上传解析);
+  //   2. 带 URL 路径的 read POST(POST /read/<url>):真实 jina 下若外层先解析 JSON body
+  //      (消费 stream),jina 内层再读同一流会 499 "Request already closed";故不解析,
+  //      选项经 header(X-Engine / X-Read-Timeout)传递,与 GET 契约及 MCP self-call 一致。
+  // 其余 JSON(如 POST /search/...)留给 search。
   const parseBody = bodyParser();
   app.use(async (ctx, next) => {
     const path = ctx.path;
     const ct = ctx.get('content-type') || '';
-    const isReadMultipart =
-      (path === '/read' || path.startsWith('/read/') || path === '/r' || path.startsWith('/r/')) &&
-      ct.includes('multipart/form-data');
-    if (isReadMultipart) return next();
+    const isReadRoute =
+      path === '/read' || path.startsWith('/read/') || path === '/r' || path.startsWith('/r/');
+    const isReadMultipart = isReadRoute && ct.includes('multipart/form-data');
+    const isReadUrlPost =
+      ctx.method === 'POST' &&
+      isReadRoute &&
+      !ct.includes('multipart/form-data') &&
+      (path.startsWith('/read/') || path.startsWith('/r/'));
+    if (isReadMultipart || isReadUrlPost) return next();
     return parseBody(ctx, next);
   });
   app.use(async (ctx) => {

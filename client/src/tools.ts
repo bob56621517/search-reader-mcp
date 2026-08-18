@@ -34,7 +34,7 @@ export function renderContainerDownText(config: ClientConfig): string {
     `本地整合服务器容器未运行(服务不可达)。容器为常驻基础设施(--restart unless-stopped),` +
     `退出 client 不会停止它。请手动恢复:\n  docker start ${config.containerName}\n` +
     `或重新创建:\n  docker run -d --name ${config.containerName} --restart unless-stopped ` +
-    `-p ${config.hostPort}:18081 -e BOCHA_API_KEY -v ${config.dataVolume}:/app/extension/data ${config.image}`
+    `-p 127.0.0.1:${config.hostPort}:18081 -e BOCHA_API_KEY -v ${config.dataVolume}:/app/extension/data ${config.image}`
   );
 }
 
