@@ -9,11 +9,11 @@ v0.3 双产出物中的 server 端:单一 HTTP 服务器,在一个端口上同�
 _Avoid_: gateway、aggregator、多端口服务
 
 **client (本地 stdio MCP)**:
-v0.3 双产出物中的另一端:运行在宿主机、经标准输入输出(stdio)与 Agent 通信的 MCP 服务,对外暴露与 server 一致的 `search`、`read` 两个工具;代理 server 的 HTTP API,并管理 server 容器的生命周期(启动/复用/回收)。
+v0.3 双产出物中的另一端:运行在宿主机、经标准输入输出(stdio)与 Agent 通信的 MCP 服务,对外暴露与 server 一致的 `search`、`read` 两个工具;代理 server 的 HTTP API,并管理 server 容器的生命周期(检测/静默启动/复用,**不做回收**,ADR-0011)。
 _Avoid_: 本地代理、stdio 服务
 
 **read**:
-把资源转换为 LLM 友好的 Markdown 正文的能力,底层进程内复用 jina 镜像的抓取模块。入参统一为 `uri`:http(s) URL 走 URL 抓取(HTTP 形态为 `/read/<url>`,`GET`/`POST` 等价,POST 可带选项 body);本地文件以 `file:///` 绝对 URI 或绝对 OS 路径传入(仅 client 支持——由 client 读取并 multipart 上传解析;server 自身不读宿主文件,非 http(s) 一律返回提示词模板引导)。相对路径一律不接受,返回指令文本。
+把资源转换为 LLM 友好的 Markdown 正文的能力,底层进程内复用 jina 镜像的抓取模块。入参统一为 `uri`:http(s) URL 走 URL 抓取(HTTP 形态为 `/read/<url>`,`GET`/`POST` 等价,选项经 header(`X-Engine` / `X-Read-Timeout`)传递);本地文件以 `file:///` 绝对 URI 或绝对 OS 路径传入(仅 client 支持——由 client 读取并 multipart 上传解析;server 自身不读宿主文件,非 http(s) 一律返回提示词模板引导)。相对路径一律不接受,返回指令文本。
 _Avoid_: 爬取、reader 服务
 
 **search**:

@@ -35,7 +35,7 @@ v0.3 把 search-reader-mcp 重构为**双产出物单仓库**:
 13. 作为开发者,我想 server 与 client 各自独立依赖、互不跨树相对 import,以便各自独立构建/发布、Docker 构建上下文自包含。
 14. 作为开发者,我想 `/catalog` 只下发 desc/hints、inputSchema 由 client 自持,以便 client 的 read 调用面(本地文件)不被 server 的 schema 束缚。
 15. 作为操作者,我想本地文件读取不设白名单,权限由 MCP host 权限层 + OS 管控,以便 agent 读本地文件成为基本能力。
-16. 作为 Agent,我想 client→server 的 read 与 search 统一走 POST,以便与 jina 契约一致(GET|POST 等价,选项可入 body)。
+16. 作为 Agent,我想 client→server 的 read 与 search 统一走 POST,以便与 jina 契约一致(GET|POST 等价;read 选项经 header、search 选项入 body)。
 17. 作为 Agent,我想 client 的 `search` 镜像整合服务器的 search 参数(`type/query/count/freshness/include/exclude`),以便行为一致。
 18. 作为操作者,我想 server 保留 `/mcp` 与 `/sse`,以便容器仍可被远程(streamable HTTP)直接连接。
 19. 作为开发者,我想通过单一主接缝(MCP 协议)测试 client,以便验证 Agent 实际体验到的契约。
@@ -48,13 +48,13 @@ v0.3 把 search-reader-mcp 重构为**双产出物单仓库**:
 - **read 缓存扩展**:`POST /read/<rest>` 与 GET 等价接入 read 缓存(jina 契约 GET|POST 等价;缓存 key 用 url + engine)。
 - **server 保留 `/mcp` 与 `/sse`**,供远程直连;client 走 stdio 不经过它们。
 - **client 工具定义**:启动时拉 `/catalog` 取 desc/hints;inputSchema 本地 zod——`search` 镜像整合服务器参数(`type/query/count/freshness/include/exclude`),`read` 为 `{uri, skip, length, engine, timeout}`。(ADR-0009)
-- **client read 行为**:`uri=http(s)://…` → `POST /read/<url>`(jina 透传,选项入 body);`uri=file:///绝对URI` 或绝对 OS 路径 → client 读取本地文件后 `POST /read`(multipart 上传)解析;相对路径 → 指令文本不解析;`skip`/`length` 在 client 本地切片。(ADR-0010)
+- **client read 行为**:`uri=http(s)://…` → `POST /read/<url>`(jina 透传,选项经 header `X-Engine` / `X-Read-Timeout` 传递——真实 jina 下带 JSON body 会 499 "Request already closed",实测修复,见 `server/src/server.ts` bodyParser 分流);`uri=file:///绝对URI` 或绝对 OS 路径 → client 读取本地文件后 `POST /read`(multipart 上传)解析;相对路径 → 指令文本不解析;`skip`/`length` 在 client 本地切片。(ADR-0010)
 - **client search 行为**:`POST /search/<type>` JSON body。
 - **client 生命周期**(ADR-0011):`GET :18081/health` 命中 → 复用;未命中 → 检查 `docker info` 与 `REQUIRED_ENVS`——齐备则后台 `docker run -d` 拉取 GHCR 镜像(`ghcr.io/bob56621517/search-reader-mcp:v0.3.0`,`--restart unless-stopped`,卷 `~/.search_reader_mcp`,透传 `BOCHA_API_KEY`),启动窗口期后台轮询 /health、工具调用返回"正在启动"状态;缺失 → stderr 报错 + 正常 MCP 失败路径退出(工具不注册)。容错:`docker run` 报 name in use → `docker start`;启动后回探 /health 定成败。容器**不回收**(常驻基础设施)。
 - **`REQUIRED_ENVS` 设计为可扩展列表**(当前 `[BOCHA_API_KEY]`),后续加必填项只改列表不改逻辑。
 - **client 运行时**:Node + tsc(与 server 一致);从仓库运行(`node client/dist/index.js`),npm 发布留后续。
 - **版本**:server 与 client 同 `0.3.0`;GHCR 镜像 tag `v0.3.0`(另有 `latest`);client 提示词中的镜像引用对齐该 tag。
-- **统一走 POST**:client→server 的 read/search 一律 POST(jina 契约 GET|POST 等价,POST 可带选项 body)。
+- **统一走 POST**:client→server 的 read/search 一律 POST(jina 契约 GET|POST 等价;read 选项经 header、search 选项入 body)。
 
 ## Testing Decisions
 
