@@ -4,7 +4,7 @@
 
 ## 项目形态
 
-- **单服务**;发布形态为 `docker-compose` + `Dockerfile`,`docker-compose.yml` 仅用于便捷启动
+- **单服务**;发布形态为 `docker-compose` + `Dockerfile`,`server/compose.yml` 仅用于便捷启动
 - 目标:扩展 Jina Reader 镜像,加入自定义搜索能力与 MCP 服务
 
 ## Agent skills

@@ -51,6 +51,33 @@ check(
   tools.text.slice(0, 200),
 );
 
+// 工具 hint 四项全声明(ADR-0009/OpenAI 目录要求):search/read 均含 destructiveHint:false
+// 响应为 SSE 帧(event: message\ndata: {...});需取 data: 行 JSON.parse,不能直接 parse 整帧
+let hintsOk = false;
+try {
+  const dataLine = tools.text.split('\n').find((l) => l.startsWith('data: '));
+  const parsed = dataLine ? JSON.parse(dataLine.slice('data: '.length)) : null;
+  const arr = parsed?.result?.tools ?? [];
+  hintsOk =
+    arr.length === 2 &&
+    arr.every((t) => {
+      const a = t.annotations || {};
+      return (
+        a.readOnlyHint === true &&
+        a.idempotentHint === true &&
+        a.openWorldHint === true &&
+        a.destructiveHint === false
+      );
+    });
+} catch {
+  hintsOk = false;
+}
+check(
+  'tools/list 的 search/read 四项 hint 全声明(含 destructiveHint:false)',
+  hintsOk,
+  tools.text.slice(0, 300),
+);
+
 // ---- read 工具(参数为 v7 的 uri/skip/length/engine/timeout) ----
 
 const readFull = await callTool('read', { uri: 'http://example.com' });

@@ -1,0 +1,20 @@
+{
+  "name": "search-reader-mcp-client",
+  "version": "0.3.0",
+  "private": true,
+  "description": "本地 stdio MCP 客户端:代理 server 的 HTTP API,向 Agent 暴露 search/read,管理容器生命周期(ADR-0008/0011)",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "tsc -p tsconfig.json && node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.5.4"
+  }
+}

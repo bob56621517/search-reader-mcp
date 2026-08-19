@@ -12,6 +12,7 @@ import {
   resolveReadTimeout,
   sliceText,
 } from './read-tools';
+import { TOOL_ANNOTATIONS } from './annotations';
 
 /**
  * MCP 服务层(官方 SDK)。暴露两个工具:
@@ -33,7 +34,7 @@ export interface McpToolDeps {
 }
 
 export function createMcpServer(deps: McpToolDeps): McpServer {
-  const server = new McpServer({ name: 'search-reader-mcp', version: '0.2.0' });
+  const server = new McpServer({ name: 'search-reader-mcp', version: '0.3.0' });
   const desc = deps.config.mcpDesc;
   const searchDesc = desc.search;
 
@@ -50,9 +51,7 @@ export function createMcpServer(deps: McpToolDeps): McpServer {
     },
     {
       title: '联网搜索(博查)',
-      readOnlyHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
+      ...TOOL_ANNOTATIONS,
     },
     async ({ type, query, count, freshness, include, exclude }) => {
       const n = Math.max(1, Math.min(50, count ?? 20));
@@ -75,9 +74,7 @@ export function createMcpServer(deps: McpToolDeps): McpServer {
     buildReadSchema(desc.read),
     {
       title: '读取网页或文件(jina)',
-      readOnlyHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
+      ...TOOL_ANNOTATIONS,
     },
     async ({ uri, skip, length, engine, timeout }) => {
       try {

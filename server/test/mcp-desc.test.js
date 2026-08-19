@@ -5,7 +5,7 @@
 // spec「Testing Decisions」要求 mcpDesc 覆盖为纯函数单测、不经 MCP 传输;
 // buildMcpDesc 的 env 纯逻辑已由 config.test.js 覆盖。本文件刻意经 InMemory 传输
 // (内存内、快速、无外部依赖)补验证「描述确实注入到工具 schema」这一接线层,
-// 即 ticket 05 验收「env 覆盖后工具/参数描述随之变化」;这是该约定最小的越界。
+// 即 v7「描述 env 化」验收「env 覆盖后工具/参数描述随之变化」;这是该约定最小的越界。
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
@@ -166,6 +166,24 @@ test('search 行为不变:工具内部异常返回可读错误文本,不抛错',
     const res = await client.callTool({ name: 'search', arguments: { query: 'x' } });
     assert.equal(res.content[0].type, 'text');
     assert.match(res.content[0].text, /bocha 上游炸了/); // 可读错误文本,而非 protocol 错误
+  } finally {
+    await client.close();
+  }
+});
+
+// ---- 四项 hint 全声明(ADR-0009/OpenAI 目录要求,与 /catalog 同源 TOOL_ANNOTATIONS) ----
+
+test('search/read 工具声明四项 hint(含 destructiveHint:false)', async () => {
+  const client = await connect(fakeBocha(), buildMcpDesc({}));
+  try {
+    const { tools } = await client.listTools();
+    assert.deepEqual(tools.map((t) => t.name).sort(), ['read', 'search']);
+    for (const t of tools) {
+      assert.equal(t.annotations.readOnlyHint, true, `${t.name}.readOnlyHint`);
+      assert.equal(t.annotations.idempotentHint, true, `${t.name}.idempotentHint`);
+      assert.equal(t.annotations.openWorldHint, true, `${t.name}.openWorldHint`);
+      assert.equal(t.annotations.destructiveHint, false, `${t.name}.destructiveHint`);
+    }
   } finally {
     await client.close();
   }

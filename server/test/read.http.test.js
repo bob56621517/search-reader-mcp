@@ -4,15 +4,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('supertest');
-const os = require('node:os');
-const path = require('node:path');
-const { loadConfig } = require('../dist/config.js');
 const { createApp } = require('../dist/server.js');
+const { makeTmpDir, makeTestConfig } = require('./http-helper.js');
 
-const tmpDir = path.join(os.tmpdir(), `srm-read-${process.pid}`);
+const tmpDir = makeTmpDir('read');
 
 function testConfig(overrides = {}) {
-  return loadConfig({ BOCHA_API_KEY: 'test-key', SEARCH_READER_MCP_DATA: tmpDir, ...overrides });
+  return makeTestConfig(tmpDir, overrides);
 }
 
 /**
@@ -73,17 +71,62 @@ test('POST /read(无尾路径)上传解析透传 jina,不缓存、不吞 multipa
   assert.equal(jina.calls.length, 2);
 });
 
-test('非 GET 带 URL(POST /read/<url>)透传 jina,不缓存', async () => {
+test('POST /read/<url> 与 GET 等价接入缓存(jina 契约 GET|POST)', async () => {
+  const jina = mockJina();
+  const app = await makeApp(testConfig({ READ_CACHE_TTL: '300' }), jina);
+  const url = '/read/' + encodeURIComponent('http://example.com');
+  const r1 = await request(app.callback()).post(url).expect(200);
+  assert.equal(r1.text, '# from jina');
+  assert.equal(jina.calls.length, 1);
+  // 第二次 POST 命中缓存,jina 不再抓取
+  const r2 = await request(app.callback()).post(url).expect(200);
+  assert.equal(r2.text, '# from jina');
+  assert.equal(jina.calls.length, 1);
+});
+
+test('POST /read/<url> 选项经 header(engine)生效,缓存键含 header engine', async () => {
+  const jina = mockJina();
+  const app = await makeApp(testConfig({ READ_CACHE_TTL: '300' }), jina);
+  const url = '/read/' + encodeURIComponent('http://bodyopts.com');
+  // header engine=browser:两次同 engine 命中同一份缓存(jina 仅抓取一次)。
+  // 注:选项经 header(X-Engine)传递——POST /read/<url> 由 server 跳过 bodyParser
+  // (真实 jina 下 JSON body 会致 jina 内层 499 "Request already closed")。
+  await request(app.callback()).post(url).set('X-Engine', 'browser').expect(200);
+  assert.equal(jina.calls.length, 1);
+  await request(app.callback()).post(url).set('X-Engine', 'browser').expect(200);
+  assert.equal(jina.calls.length, 1);
+});
+
+test('POST /read/<url> header timeout 触发整体超时(504)', async () => {
+  const jina = mockJina({ handler: () => {} }); // 挂起,永不 end
+  const app = await makeApp(testConfig(), jina);
+  await request(app.callback())
+    .post('/read/' + encodeURIComponent('http://slow.com'))
+    .set('X-Read-Timeout', '0.1')
+    .expect(504);
+});
+
+test('POST /read/<url> header engine 透传 X-Engine 给 jina(端到端生效)', async () => {
   const jina = mockJina();
   const app = await makeApp(testConfig(), jina);
-  const res = await request(app.callback())
-    .post('/read/' + encodeURIComponent('http://example.com'))
-    .expect(200);
-  assert.equal(res.text, '# from jina');
+  // header engine=browser → X-Engine: browser
   await request(app.callback())
-    .post('/read/' + encodeURIComponent('http://example.com'))
+    .post('/read/' + encodeURIComponent('http://eng-a.com'))
+    .set('X-Engine', 'browser')
     .expect(200);
-  assert.equal(jina.calls.length, 2); // 透传,未缓存
+  assert.equal(jina.calls[0].headers['x-engine'], 'browser');
+  // direct → 归一化 curl
+  await request(app.callback())
+    .post('/read/' + encodeURIComponent('http://eng-b.com'))
+    .set('X-Engine', 'direct')
+    .expect(200);
+  assert.equal(jina.calls[1].headers['x-engine'], 'curl');
+  // 缺省 auto 不透传
+  await request(app.callback())
+    .post('/read/' + encodeURIComponent('http://eng-c.com'))
+    .set('Content-Type', 'application/json')
+    .expect(200);
+  assert.equal(jina.calls[2].headers['x-engine'], undefined);
 });
 
 // ---- 缓存接入 ----
